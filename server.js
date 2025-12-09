@@ -1,16 +1,27 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const { createClient } = require('@supabase/supabase-js');
+const bcrypt = require('bcryptjs');
 
 const app = express();
+
+// ==================== SUPABASE CONFIGURATION ====================
+// Get Supabase credentials from environment variables
+const supabaseUrl = process.env.SUPABASE_URL || 'https://ribehublefecccabzwkv.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpYmVodWJsZWZlY2NjYWJ6d2t2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzMzg1ODksImV4cCI6MjA3NjkxNDU4OX0.4i6yQOCAisuFnElBKzCf_kdfl1SV5t6OknEVmPfySYc';
+
+// Initialize Supabase client
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+console.log('🔗 Supabase Status:', supabaseUrl.includes('your-project') ? '⚠️ Configure SUPABASE_URL env var' : '✅ Connected');
+// ================================================================
 
 // ==================== CORS CONFIGURATION ====================
 app.use(cors({
     origin: [
         'https://unobtrix.netlify.app',
-        'https://unobtrix.netlify.app/',
         'https://unobtrix.netlify.app/signup',
-        'https://unobtrix.netlify.app/farmerpage',
         'https://unobtrix.netlify.app/customer',
         'http://localhost:3000',
         'http://localhost:5500',
@@ -19,51 +30,17 @@ app.use(cors({
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-    exposedHeaders: ['Content-Length'],
-    maxAge: 86400 // 24 hours
+    exposedHeaders: ['Content-Length']
 }));
 
 // Handle preflight requests
-app.options('*', (req, res) => {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Max-Age', '86400');
-    res.status(204).end();
-});
-
-// Additional CORS headers middleware
-app.use((req, res, next) => {
-    const allowedOrigins = [
-        'https://unobtrix.netlify.app',
-        'http://localhost:3000',
-        'http://localhost:5500'
-    ];
-    
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes(origin) || 
-        (origin && origin.includes('.netlify.app'))) {
-        res.header('Access-Control-Allow-Origin', origin);
-    }
-    
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
-    
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-    
-    next();
-});
-// ============================================================
+app.options('*', cors());
 
 // Body parser
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging middleware
+// Request logging
 app.use((req, res, next) => {
     console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
     console.log('Origin:', req.headers.origin || 'No origin');
@@ -74,7 +51,6 @@ app.use((req, res, next) => {
 // ==================== IN-MEMORY STORAGE ====================
 const otpStore = new Map();
 
-// Generate random OTP
 function generateOTP(length = 6) {
     const digits = '0123456789';
     let otp = '';
@@ -84,38 +60,156 @@ function generateOTP(length = 6) {
     return otp;
 }
 
+// ==================== SUPABASE HELPER FUNCTIONS ====================
+
+// Hash password using bcrypt
+async function hashPassword(password) {
+    const saltRounds = 10;
+    return await bcrypt.hash(password, saltRounds);
+}
+
+// Check if user already exists
+async function checkUserExists(email, mobile) {
+    try {
+        // Check in consumers table
+        const { data: consumerData, error: consumerError } = await supabase
+            .from('consumers')
+            .select('id')
+            .or(`email.eq.${email},mobile.eq.${mobile}`)
+            .limit(1);
+
+        if (consumerError) {
+            console.log('Consumers table check error:', consumerError.message);
+        }
+
+        // Check in farmers table
+        const { data: farmerData, error: farmerError } = await supabase
+            .from('farmers')
+            .select('id')
+            .or(`email.eq.${email},mobile.eq.${mobile}`)
+            .limit(1);
+
+        if (farmerError) {
+            console.log('Farmers table check error:', farmerError.message);
+        }
+
+        return (consumerData && consumerData.length > 0) || (farmerData && farmerData.length > 0);
+    } catch (error) {
+        console.error('Error checking user existence:', error);
+        return false;
+    }
+}
+
+// Insert consumer into Supabase
+async function insertConsumer(userData) {
+    try {
+        const password_hash = await hashPassword(userData.password);
+        
+        const { data, error } = await supabase
+            .from('consumers')
+            .insert([{
+                username: userData.username,
+                email: userData.email,
+                mobile: userData.mobile,
+                password_hash: password_hash,
+                profile_photo_url: userData.profile_photo_url || null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                status: 'active'
+            }])
+            .select('id, username, email, mobile, created_at');
+
+        if (error) {
+            console.error('Supabase insert error:', error);
+            throw error;
+        }
+
+        return { success: true, data: data[0] };
+    } catch (error) {
+        console.error('Error inserting consumer:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Insert farmer into Supabase
+async function insertFarmer(farmerData) {
+    try {
+        const password_hash = await hashPassword(farmerData.password);
+        
+        // Convert certifications to array
+        let certificationsArray = [];
+        if (farmerData.certifications) {
+            if (Array.isArray(farmerData.certifications)) {
+                certificationsArray = farmerData.certifications;
+            } else if (typeof farmerData.certifications === 'string') {
+                certificationsArray = farmerData.certifications.split(',').map(c => c.trim()).filter(c => c);
+            }
+        }
+
+        const { data, error } = await supabase
+            .from('farmers')
+            .insert([{
+                username: farmerData.username,
+                email: farmerData.email,
+                aadhaar_number: farmerData.aadhaar_number,
+                mobile: farmerData.mobile,
+                password_hash: password_hash,
+                profile_photo_url: farmerData.profile_photo_url || null,
+                farm_name: farmerData.farm_name,
+                farm_size: parseFloat(farmerData.farm_size) || 0,
+                specialization: farmerData.specialization || 'Not specified',
+                certifications: certificationsArray,
+                village: farmerData.village || '',
+                taluka: farmerData.taluka || '',
+                district: farmerData.district || '',
+                state: farmerData.state || '',
+                pin_code: farmerData.pin_code || '',
+                account_holder_name: farmerData.account_holder_name || '',
+                account_number: farmerData.account_number || '',
+                bank_name: farmerData.bank_name || '',
+                ifsc_code: farmerData.ifsc_code || '',
+                branch_name: farmerData.branch_name || '',
+                aadhaar_verified: farmerData.aadhaar_verified || false,
+                mobile_verified: farmerData.mobile_verified || false,
+                account_verified: 'pending',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                status: 'pending_verification'
+            }])
+            .select('id, username, email, mobile, farm_name, created_at');
+
+        if (error) {
+            console.error('Supabase insert error:', error);
+            throw error;
+        }
+
+        return { success: true, data: data[0] };
+    } catch (error) {
+        console.error('Error inserting farmer:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 // ==================== HEALTH CHECK ====================
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy',
         server: 'FarmTrials Registration API',
         timestamp: new Date().toISOString(),
+        supabase: supabaseUrl.includes('your-project') ? 'Not configured' : 'Connected',
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development',
-        cors: 'enabled',
-        endpoints: {
-            health: 'GET /health',
-            mobileOTP: 'POST /api/mobile/send-otp',
-            verifyMobile: 'POST /api/mobile/verify',
-            aadhaarOTP: 'POST /api/aadhaar/send-otp',
-            verifyAadhaar: 'POST /api/aadhaar/verify',
-            registerConsumer: 'POST /api/register/consumer',
-            registerFarmer: 'POST /api/register/farmer',
-            uploadPhoto: 'POST /api/upload-photo'
-        }
+        cors: 'enabled'
     });
 });
 
 // ==================== MOBILE OTP ENDPOINTS ====================
-
-// Send OTP to mobile
 app.post('/api/mobile/send-otp', (req, res) => {
     try {
         const { mobile } = req.body;
         
         console.log('📱 Mobile OTP request for:', mobile);
         
-        if (!mobile || mobile.length !== 10) {
+        if (!mobile || !/^\d{10}$/.test(mobile)) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Valid 10-digit mobile number is required' 
@@ -123,38 +217,34 @@ app.post('/api/mobile/send-otp', (req, res) => {
         }
         
         const otp = generateOTP();
-        const expiryTime = Date.now() + 10 * 60 * 1000; // 10 minutes
+        const expiryTime = Date.now() + 10 * 60 * 1000;
         
         otpStore.set(mobile, { 
             otp, 
             expiry: expiryTime,
-            created: new Date().toISOString(),
-            type: 'mobile'
+            created: new Date().toISOString()
         });
         
-        console.log(`✅ OTP ${otp} generated for ${mobile} (expires in 10 minutes)`);
+        console.log(`✅ OTP ${otp} generated for ${mobile}`);
         
         return res.json({
             success: true,
-            message: 'OTP sent successfully to your mobile number.',
-            otp: otp, // For testing/debugging
+            message: 'OTP sent successfully',
+            otp: otp,
             debug_otp: otp, // For frontend auto-fill
-            expiry: '10 minutes',
-            timestamp: new Date().toISOString(),
-            mobile: mobile
+            expiry: '10 minutes'
         });
         
     } catch (error) {
-        console.error('❌ Error generating mobile OTP:', error);
+        console.error('❌ Error generating OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to send OTP. Please try again.',
+            message: 'Failed to send OTP',
             error: error.message 
         });
     }
 });
 
-// Verify Mobile OTP
 app.post('/api/mobile/verify', (req, res) => {
     try {
         const { mobile, otp } = req.body;
@@ -173,7 +263,7 @@ app.post('/api/mobile/verify', (req, res) => {
         if (!storedData) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'No OTP found for this number. Please request a new OTP.' 
+                message: 'No OTP found. Please request a new OTP.' 
             });
         }
         
@@ -188,41 +278,35 @@ app.post('/api/mobile/verify', (req, res) => {
         if (storedData.otp !== otp) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Invalid OTP. Please check and try again.' 
+                message: 'Invalid OTP. Please try again.' 
             });
         }
         
         otpStore.delete(mobile);
         
-        console.log(`✅ Mobile ${mobile} verified successfully`);
-        
         res.json({
             success: true,
-            message: 'Mobile number verified successfully!',
-            verifiedAt: new Date().toISOString(),
-            mobile: mobile
+            message: 'Mobile number verified successfully!'
         });
         
     } catch (error) {
-        console.error('❌ Error verifying mobile OTP:', error);
+        console.error('❌ Error verifying OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to verify OTP. Please try again.',
+            message: 'Failed to verify OTP',
             error: error.message 
         });
     }
 });
 
 // ==================== AADHAAR OTP ENDPOINTS ====================
-
-// Send Aadhaar OTP
 app.post('/api/aadhaar/send-otp', (req, res) => {
     try {
-        const { aadhaar_number, mobile } = req.body;
+        const { aadhaar_number } = req.body;
         
         console.log('🆔 Aadhaar OTP request for:', aadhaar_number);
         
-        if (!aadhaar_number || aadhaar_number.length !== 12) {
+        if (!aadhaar_number || !/^\d{12}$/.test(aadhaar_number)) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Valid 12-digit Aadhaar number is required' 
@@ -235,34 +319,29 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
         otpStore.set(`aadhaar_${aadhaar_number}`, { 
             otp, 
             expiry: expiryTime,
-            created: new Date().toISOString(),
-            type: 'aadhaar',
-            mobile: mobile
+            created: new Date().toISOString()
         });
         
         console.log(`✅ Aadhaar OTP ${otp} generated for ${aadhaar_number}`);
         
         return res.json({
             success: true,
-            message: 'Aadhaar verification OTP sent successfully.',
+            message: 'Aadhaar OTP sent successfully',
             otp: otp,
             debug_otp: otp,
-            expiry: '10 minutes',
-            timestamp: new Date().toISOString(),
-            aadhaar_number: aadhaar_number
+            expiry: '10 minutes'
         });
         
     } catch (error) {
         console.error('❌ Error generating Aadhaar OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to send Aadhaar OTP. Please try again.',
+            message: 'Failed to send Aadhaar OTP',
             error: error.message 
         });
     }
 });
 
-// Verify Aadhaar OTP
 app.post('/api/aadhaar/verify', (req, res) => {
     try {
         const { aadhaar_number, otp } = req.body;
@@ -281,7 +360,7 @@ app.post('/api/aadhaar/verify', (req, res) => {
         if (!storedData) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'No OTP found for this Aadhaar number. Please request a new OTP.' 
+                message: 'No OTP found. Please request a new OTP.' 
             });
         }
         
@@ -296,39 +375,35 @@ app.post('/api/aadhaar/verify', (req, res) => {
         if (storedData.otp !== otp) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Invalid OTP. Please check and try again.' 
+                message: 'Invalid OTP. Please try again.' 
             });
         }
         
         otpStore.delete(`aadhaar_${aadhaar_number}`);
         
-        console.log(`✅ Aadhaar ${aadhaar_number} verified successfully`);
-        
         res.json({
             success: true,
-            message: 'Aadhaar verified successfully!',
-            verifiedAt: new Date().toISOString(),
-            aadhaar_number: aadhaar_number
+            message: 'Aadhaar verified successfully!'
         });
         
     } catch (error) {
         console.error('❌ Error verifying Aadhaar OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to verify Aadhaar OTP. Please try again.',
+            message: 'Failed to verify Aadhaar OTP',
             error: error.message 
         });
     }
 });
 
-// ==================== USER REGISTRATION ENDPOINTS ====================
+// ==================== REGISTRATION ENDPOINTS (WITH SUPABASE) ====================
 
 // Consumer Registration
-app.post('/api/register/consumer', (req, res) => {
+app.post('/api/register/consumer', async (req, res) => {
     try {
         const { username, email, mobile, password, profile_photo_url } = req.body;
         
-        console.log('👤 Consumer registration for:', username, email);
+        console.log('👤 Consumer registration request:', { username, email, mobile });
         
         // Validation
         if (!username || username.length < 3) {
@@ -345,7 +420,7 @@ app.post('/api/register/consumer', (req, res) => {
             });
         }
         
-        if (!mobile || mobile.length !== 10) {
+        if (!mobile || !/^\d{10}$/.test(mobile)) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Valid 10-digit mobile number is required' 
@@ -359,23 +434,40 @@ app.post('/api/register/consumer', (req, res) => {
             });
         }
         
-        // Simulate successful registration
-        const userId = 'CONS_' + Date.now().toString(36).toUpperCase();
+        // Check if user already exists
+        const userExists = await checkUserExists(email, mobile);
+        if (userExists) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'User with this email or mobile already exists' 
+            });
+        }
         
-        console.log(`✅ Consumer account created: ${userId} for ${username}`);
+        // Save to Supabase
+        const result = await insertConsumer({
+            username,
+            email,
+            mobile,
+            password,
+            profile_photo_url
+        });
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to save consumer data to database');
+        }
+        
+        console.log('✅ Consumer saved to Supabase:', result.data.id);
         
         res.json({
             success: true,
             message: 'Consumer account created successfully!',
-            user: { 
-                id: userId,
-                username: username, 
-                email: email, 
-                mobile: mobile,
-                profile_photo_url: profile_photo_url || null,
+            user: {
+                id: result.data.id,
+                username,
+                email,
+                mobile,
                 user_type: 'consumer',
-                created_at: new Date().toISOString(),
-                status: 'active'
+                created_at: result.data.created_at
             }
         });
         
@@ -390,7 +482,7 @@ app.post('/api/register/consumer', (req, res) => {
 });
 
 // Farmer Registration
-app.post('/api/register/farmer', (req, res) => {
+app.post('/api/register/farmer', async (req, res) => {
     try {
         const { 
             username, email, aadhaar_number, mobile, password,
@@ -400,9 +492,9 @@ app.post('/api/register/farmer', (req, res) => {
             branch_name, aadhaar_verified, mobile_verified
         } = req.body;
         
-        console.log('👨‍🌾 Farmer registration for:', username, farm_name);
+        console.log('👨‍🌾 Farmer registration request:', { username, email, farm_name });
         
-        // Basic validation
+        // Validation
         if (!username || username.length < 3) {
             return res.status(400).json({ 
                 success: false, 
@@ -417,14 +509,14 @@ app.post('/api/register/farmer', (req, res) => {
             });
         }
         
-        if (!aadhaar_number || aadhaar_number.length !== 12) {
+        if (!aadhaar_number || !/^\d{12}$/.test(aadhaar_number)) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Valid 12-digit Aadhaar number is required' 
             });
         }
         
-        if (!mobile || mobile.length !== 10) {
+        if (!mobile || !/^\d{10}$/.test(mobile)) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Valid 10-digit mobile number is required' 
@@ -445,49 +537,60 @@ app.post('/api/register/farmer', (req, res) => {
             });
         }
         
-        // Simulate successful registration
-        const farmerId = 'FARM_' + Date.now().toString(36).toUpperCase();
+        // Check if user already exists
+        const userExists = await checkUserExists(email, mobile);
+        if (userExists) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'User with this email or mobile already exists' 
+            });
+        }
         
-        console.log(`✅ Farmer account created: ${farmerId} for ${username}`);
+        // Save to Supabase
+        const result = await insertFarmer({
+            username,
+            email,
+            aadhaar_number,
+            mobile,
+            password,
+            profile_photo_url,
+            farm_name,
+            farm_size,
+            specialization,
+            certifications,
+            village,
+            taluka,
+            district,
+            state,
+            pin_code,
+            account_holder_name,
+            account_number,
+            bank_name,
+            ifsc_code,
+            branch_name,
+            aadhaar_verified: aadhaar_verified || false,
+            mobile_verified: mobile_verified || false
+        });
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to save farmer data to database');
+        }
+        
+        console.log('✅ Farmer saved to Supabase:', result.data.id);
         
         res.json({
             success: true,
             message: 'Farmer account created successfully! Your account will be verified within 24-48 hours.',
-            farmer: { 
-                id: farmerId,
-                username: username, 
-                email: email, 
-                mobile: mobile,
-                aadhaar_number: aadhaar_number,
-                profile_photo_url: profile_photo_url || null,
-                farm_details: {
-                    farm_name: farm_name,
-                    farm_size: farm_size || 0,
-                    specialization: specialization || 'Not specified',
-                    certifications: certifications || [],
-                    location: {
-                        village: village || '',
-                        taluka: taluka || '',
-                        district: district || '',
-                        state: state || '',
-                        pin_code: pin_code || ''
-                    }
-                },
-                bank_details: {
-                    account_holder_name: account_holder_name || '',
-                    account_number: account_number || '',
-                    bank_name: bank_name || '',
-                    ifsc_code: ifsc_code || '',
-                    branch_name: branch_name || ''
-                },
-                verification_status: {
-                    aadhaar_verified: aadhaar_verified || false,
-                    mobile_verified: mobile_verified || false,
-                    account_verified: 'pending'
-                },
+            farmer: {
+                id: result.data.id,
+                username,
+                email,
+                mobile,
+                aadhaar_number,
+                farm_name,
                 user_type: 'farmer',
-                created_at: new Date().toISOString(),
-                status: 'pending_verification'
+                status: 'pending_verification',
+                created_at: result.data.created_at
             }
         });
         
@@ -502,7 +605,6 @@ app.post('/api/register/farmer', (req, res) => {
 });
 
 // ==================== PHOTO UPLOAD ENDPOINT ====================
-
 app.post('/api/upload-photo', (req, res) => {
     try {
         const { imageData, userType } = req.body;
@@ -516,66 +618,81 @@ app.post('/api/upload-photo', (req, res) => {
             });
         }
         
-        // Simulate photo upload and return a mock URL
-        // In production, you would upload to cloud storage like S3, Cloudinary, etc.
+        // Simulate photo upload (in production, upload to S3/Cloudinary)
         const timestamp = Date.now();
         const mockPhotoUrl = `https://api.dicebear.com/7.x/avatars/svg?seed=${userType}_${timestamp}`;
-        
-        console.log(`✅ Photo uploaded successfully for ${userType}`);
         
         res.json({
             success: true,
             message: 'Profile photo uploaded successfully!',
-            photoUrl: mockPhotoUrl,
-            uploadedAt: new Date().toISOString(),
-            userType: userType
+            photoUrl: mockPhotoUrl
         });
         
     } catch (error) {
         console.error('❌ Error handling photo upload:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to upload photo. Please try again.',
+            message: 'Failed to upload photo',
             error: error.message 
         });
     }
 });
 
-// ==================== TEST ENDPOINTS ====================
-
-// Simple test endpoint
-app.get('/api/test', (req, res) => {
-    res.json({
-        success: true,
-        message: 'FarmTrials API is working! 🚀',
-        server: 'Render',
-        timestamp: new Date().toISOString(),
-        cors: 'enabled',
-        client_ip: req.ip,
-        user_agent: req.headers['user-agent']
-    });
-});
-
-// CORS test endpoint
-app.get('/api/cors-test', (req, res) => {
-    res.json({
-        success: true,
-        message: 'CORS is working correctly! ✅',
-        origin: req.headers.origin || 'No origin header',
-        allowed: true,
-        timestamp: new Date().toISOString()
-    });
+// ==================== SUPABASE TEST ENDPOINT ====================
+app.get('/api/test-supabase', async (req, res) => {
+    try {
+        // Test Supabase connection
+        const { data: consumers, error: consumersError } = await supabase
+            .from('consumers')
+            .select('count')
+            .limit(1);
+        
+        const { data: farmers, error: farmersError } = await supabase
+            .from('farmers')
+            .select('count')
+            .limit(1);
+        
+        const errors = [];
+        if (consumersError) errors.push(`Consumers: ${consumersError.message}`);
+        if (farmersError) errors.push(`Farmers: ${farmersError.message}`);
+        
+        if (errors.length > 0) {
+            return res.json({
+                success: false,
+                message: 'Supabase connection test failed',
+                errors: errors,
+                hint: 'Check if tables exist and RLS policies allow access'
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: 'Supabase connected successfully!',
+            supabase_url: supabaseUrl,
+            tables: {
+                consumers: 'accessible',
+                farmers: 'accessible'
+            },
+            status: 'ready'
+        });
+    } catch (error) {
+        res.json({
+            success: false,
+            message: 'Supabase test failed',
+            error: error.message
+        });
+    }
 });
 
 // ==================== ROOT ENDPOINT ====================
-
 app.get('/', (req, res) => {
     res.json({ 
         server: 'FarmTrials Registration API',
         version: '1.0.0',
         status: 'operational',
-        documentation: {
-            health_check: 'GET /health',
+        supabase: supabaseUrl.includes('your-project') ? 'Not configured' : 'Connected',
+        endpoints: {
+            health: 'GET /health',
             mobile_otp: {
                 send: 'POST /api/mobile/send-otp',
                 verify: 'POST /api/mobile/verify'
@@ -589,59 +706,30 @@ app.get('/', (req, res) => {
                 farmer: 'POST /api/register/farmer'
             },
             upload: 'POST /api/upload-photo',
-            test: 'GET /api/test',
-            cors_test: 'GET /api/cors-test'
-        },
-        cors: {
-            enabled: true,
-            allowed_origins: [
-                'https://unobtrix.netlify.app',
-                'http://localhost:3000',
-                'http://localhost:5500'
-            ]
+            supabase_test: 'GET /api/test-supabase'
         }
     });
 });
 
 // ==================== ERROR HANDLING ====================
-
-// 404 Handler
 app.use((req, res) => {
     res.status(404).json({
         success: false,
         message: 'Endpoint not found',
-        path: req.path,
-        method: req.method,
-        available_endpoints: [
-            '/health',
-            '/api/mobile/send-otp',
-            '/api/mobile/verify',
-            '/api/aadhaar/send-otp',
-            '/api/aadhaar/verify',
-            '/api/register/consumer',
-            '/api/register/farmer',
-            '/api/upload-photo',
-            '/api/test',
-            '/api/cors-test'
-        ]
+        path: req.path
     });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
     console.error('💥 Server error:', err);
-    
     res.status(500).json({
         success: false,
         message: 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!',
-        timestamp: new Date().toISOString()
+        error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
     });
 });
 
 // ==================== OTP CLEANUP ====================
-
-// Clean up expired OTPs every hour
 setInterval(() => {
     const now = Date.now();
     let cleanedCount = 0;
@@ -656,33 +744,25 @@ setInterval(() => {
     if (cleanedCount > 0) {
         console.log(`🧹 Cleaned up ${cleanedCount} expired OTPs`);
     }
-}, 60 * 60 * 1000); // Every hour
+}, 60 * 60 * 1000);
 
 // ==================== SERVER START ====================
-
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
     console.log(`
-    🚀 FarmTrials Registration Server
+    🚀 FarmTrials Backend Server
     📍 Port: ${PORT}
-    🌐 Environment: ${process.env.NODE_ENV || 'development'}
-    ✅ CORS: Enabled
-    🔗 Frontend: https://unobtrix.netlify.app
+    🔗 Supabase: ${supabaseUrl.includes('your-project') ? '⚠️ NOT CONFIGURED' : '✅ Connected'}
+    📍 Frontend: https://unobtrix.netlify.app
     ⏰ Started: ${new Date().toISOString()}
-    📊 OTP Store: ${otpStore.size} entries
+    📦 Dependencies: Supabase, bcryptjs, express, cors
     `);
     
-    console.log('\n📋 Available endpoints:');
-    console.log('   GET  /health            - Health check');
-    console.log('   POST /api/mobile/send-otp - Send mobile OTP');
-    console.log('   POST /api/mobile/verify   - Verify mobile OTP');
-    console.log('   POST /api/aadhaar/send-otp - Send Aadhaar OTP');
-    console.log('   POST /api/aadhaar/verify   - Verify Aadhaar OTP');
-    console.log('   POST /api/register/consumer - Register consumer');
-    console.log('   POST /api/register/farmer   - Register farmer');
-    console.log('   POST /api/upload-photo     - Upload profile photo');
-    console.log('   GET  /api/test           - API test endpoint');
-    console.log('   GET  /api/cors-test      - CORS test endpoint');
-    console.log('\n✅ Server ready to accept connections!\n');
+    if (supabaseUrl.includes('your-project')) {
+        console.log('\n⚠️  WARNING: Supabase not configured!');
+        console.log('   Set these environment variables on Render:');
+        console.log('   SUPABASE_URL=https://your-project.supabase.co');
+        console.log('   SUPABASE_ANON_KEY=your-anon-key-here\n');
+    }
 });
