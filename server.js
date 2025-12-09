@@ -4,53 +4,39 @@ const bodyParser = require('body-parser');
 
 const app = express();
 
-// ==================== CORS FIX ====================
-// Enable CORS for all routes
+// ==================== CORS CONFIGURATION ====================
 app.use(cors({
     origin: [
-        'https://unobtrix.netlify.app/',      // Your exact Netlify URL
-        'https://unobtrix.netlify.app/signup',             // All Netlify subdomains
+        'https://unobtrix.netlify.app',
+        'https://unobtrix.netlify.app/',
+        'https://unobtrix.netlify.app/signup',
+        'https://unobtrix.netlify.app/farmerpage',
+        'https://unobtrix.netlify.app/customer',
         'http://localhost:3000',
         'http://localhost:5500',
-        'http://127.0.0.1:5500',
-        'https://127.0.0.1:5500'
+        'http://127.0.0.1:5500'
     ],
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: [
-        'Content-Type',
-        'Authorization', 
-        'Accept',
-        'Origin',
-        'X-Requested-With',
-        'X-CSRF-Token'
-    ],
-    exposedHeaders: ['Content-Length', 'Content-Type'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    exposedHeaders: ['Content-Length'],
+    maxAge: 86400 // 24 hours
 }));
 
-// Handle preflight requests explicitly
-app.options('*', cors());  // Enable preflight for all routes
-// ==================================================
-
-// Body parser
-app.use(bodyParser.json({ limit: '10mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
-
-// Request logging
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-    console.log('Origin:', req.headers.origin || 'No origin');
-    console.log('Headers:', req.headers);
-    next();
+// Handle preflight requests
+app.options('*', (req, res) => {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Max-Age', '86400');
+    res.status(204).end();
 });
 
-// Add CORS headers to every response (additional safety)
+// Additional CORS headers middleware
 app.use((req, res, next) => {
     const allowedOrigins = [
         'https://unobtrix.netlify.app',
-        'https://*.netlify.app',
         'http://localhost:3000',
         'http://localhost:5500'
     ];
@@ -61,9 +47,9 @@ app.use((req, res, next) => {
         res.header('Access-Control-Allow-Origin', origin);
     }
     
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
     res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
     
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
@@ -71,9 +57,21 @@ app.use((req, res, next) => {
     
     next();
 });
+// ============================================================
 
-// ==================== EXISTING ROUTES ====================
-// In-memory storage for OTPs
+// Body parser
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+    console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+    console.log('Origin:', req.headers.origin || 'No origin');
+    console.log('User-Agent:', req.headers['user-agent']);
+    next();
+});
+
+// ==================== IN-MEMORY STORAGE ====================
 const otpStore = new Map();
 
 // Generate random OTP
@@ -86,68 +84,82 @@ function generateOTP(length = 6) {
     return otp;
 }
 
-// Health check endpoint
+// ==================== HEALTH CHECK ====================
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy',
+        server: 'FarmTrials Registration API',
         timestamp: new Date().toISOString(),
-        otpStoreSize: otpStore.size,
-        server: 'Render',
         uptime: process.uptime(),
-        cors: 'enabled'
+        environment: process.env.NODE_ENV || 'development',
+        cors: 'enabled',
+        endpoints: {
+            health: 'GET /health',
+            mobileOTP: 'POST /api/mobile/send-otp',
+            verifyMobile: 'POST /api/mobile/verify',
+            aadhaarOTP: 'POST /api/aadhaar/send-otp',
+            verifyAadhaar: 'POST /api/aadhaar/verify',
+            registerConsumer: 'POST /api/register/consumer',
+            registerFarmer: 'POST /api/register/farmer',
+            uploadPhoto: 'POST /api/upload-photo'
+        }
     });
 });
+
+// ==================== MOBILE OTP ENDPOINTS ====================
 
 // Send OTP to mobile
 app.post('/api/mobile/send-otp', (req, res) => {
     try {
         const { mobile } = req.body;
         
-        console.log('OTP request for mobile:', mobile);
+        console.log('📱 Mobile OTP request for:', mobile);
         
-        if (!mobile) {
+        if (!mobile || mobile.length !== 10) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Mobile number is required' 
+                message: 'Valid 10-digit mobile number is required' 
             });
         }
         
         const otp = generateOTP();
-        const expiryTime = Date.now() + 10 * 60 * 1000;
+        const expiryTime = Date.now() + 10 * 60 * 1000; // 10 minutes
         
         otpStore.set(mobile, { 
             otp, 
             expiry: expiryTime,
-            created: new Date().toISOString()
+            created: new Date().toISOString(),
+            type: 'mobile'
         });
         
-        console.log(`Generated OTP for ${mobile}: ${otp} (Valid for 10 minutes)`);
+        console.log(`✅ OTP ${otp} generated for ${mobile} (expires in 10 minutes)`);
         
         return res.json({
             success: true,
-            message: 'OTP generated successfully.',
-            otp: otp,
+            message: 'OTP sent successfully to your mobile number.',
+            otp: otp, // For testing/debugging
+            debug_otp: otp, // For frontend auto-fill
             expiry: '10 minutes',
             timestamp: new Date().toISOString(),
             mobile: mobile
         });
         
     } catch (error) {
-        console.error('Error generating OTP:', error);
+        console.error('❌ Error generating mobile OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to generate OTP',
+            message: 'Failed to send OTP. Please try again.',
             error: error.message 
         });
     }
 });
 
-// Verify OTP
+// Verify Mobile OTP
 app.post('/api/mobile/verify', (req, res) => {
     try {
         const { mobile, otp } = req.body;
         
-        console.log('OTP verification request:', { mobile, otp });
+        console.log('📱 Mobile OTP verification for:', mobile);
         
         if (!mobile || !otp) {
             return res.status(400).json({ 
@@ -161,7 +173,7 @@ app.post('/api/mobile/verify', (req, res) => {
         if (!storedData) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'No OTP found for this number. Please generate a new OTP.' 
+                message: 'No OTP found for this number. Please request a new OTP.' 
             });
         }
         
@@ -169,46 +181,51 @@ app.post('/api/mobile/verify', (req, res) => {
             otpStore.delete(mobile);
             return res.status(400).json({ 
                 success: false, 
-                message: 'OTP has expired. Please generate a new OTP.' 
+                message: 'OTP has expired. Please request a new OTP.' 
             });
         }
         
         if (storedData.otp !== otp) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Invalid OTP. Please try again.' 
+                message: 'Invalid OTP. Please check and try again.' 
             });
         }
         
         otpStore.delete(mobile);
         
+        console.log(`✅ Mobile ${mobile} verified successfully`);
+        
         res.json({
             success: true,
-            message: 'Mobile number verified successfully',
-            verifiedAt: new Date().toISOString()
+            message: 'Mobile number verified successfully!',
+            verifiedAt: new Date().toISOString(),
+            mobile: mobile
         });
         
     } catch (error) {
-        console.error('Error verifying OTP:', error);
+        console.error('❌ Error verifying mobile OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to verify OTP',
+            message: 'Failed to verify OTP. Please try again.',
             error: error.message 
         });
     }
 });
 
-// Aadhaar OTP endpoints
+// ==================== AADHAAR OTP ENDPOINTS ====================
+
+// Send Aadhaar OTP
 app.post('/api/aadhaar/send-otp', (req, res) => {
     try {
-        const { aadhaar_number } = req.body;
+        const { aadhaar_number, mobile } = req.body;
         
-        console.log('Aadhaar OTP request:', { aadhaar_number });
+        console.log('🆔 Aadhaar OTP request for:', aadhaar_number);
         
-        if (!aadhaar_number) {
+        if (!aadhaar_number || aadhaar_number.length !== 12) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Aadhaar number is required' 
+                message: 'Valid 12-digit Aadhaar number is required' 
             });
         }
         
@@ -218,35 +235,39 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
         otpStore.set(`aadhaar_${aadhaar_number}`, { 
             otp, 
             expiry: expiryTime,
-            created: new Date().toISOString()
+            created: new Date().toISOString(),
+            type: 'aadhaar',
+            mobile: mobile
         });
         
-        console.log(`Generated Aadhaar OTP for ${aadhaar_number}: ${otp}`);
+        console.log(`✅ Aadhaar OTP ${otp} generated for ${aadhaar_number}`);
         
         return res.json({
             success: true,
-            message: 'Aadhaar OTP generated successfully.',
+            message: 'Aadhaar verification OTP sent successfully.',
             otp: otp,
+            debug_otp: otp,
             expiry: '10 minutes',
             timestamp: new Date().toISOString(),
             aadhaar_number: aadhaar_number
         });
         
     } catch (error) {
-        console.error('Error generating Aadhaar OTP:', error);
+        console.error('❌ Error generating Aadhaar OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to generate Aadhaar OTP',
+            message: 'Failed to send Aadhaar OTP. Please try again.',
             error: error.message 
         });
     }
 });
 
+// Verify Aadhaar OTP
 app.post('/api/aadhaar/verify', (req, res) => {
     try {
         const { aadhaar_number, otp } = req.body;
         
-        console.log('Aadhaar verification request:', { aadhaar_number, otp });
+        console.log('🆔 Aadhaar verification for:', aadhaar_number);
         
         if (!aadhaar_number || !otp) {
             return res.status(400).json({ 
@@ -260,7 +281,7 @@ app.post('/api/aadhaar/verify', (req, res) => {
         if (!storedData) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'No OTP found for this Aadhaar. Please generate a new OTP.' 
+                message: 'No OTP found for this Aadhaar number. Please request a new OTP.' 
             });
         }
         
@@ -268,120 +289,225 @@ app.post('/api/aadhaar/verify', (req, res) => {
             otpStore.delete(`aadhaar_${aadhaar_number}`);
             return res.status(400).json({ 
                 success: false, 
-                message: 'OTP has expired. Please generate a new OTP.' 
+                message: 'OTP has expired. Please request a new OTP.' 
             });
         }
         
         if (storedData.otp !== otp) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Invalid OTP. Please try again.' 
+                message: 'Invalid OTP. Please check and try again.' 
             });
         }
         
         otpStore.delete(`aadhaar_${aadhaar_number}`);
         
+        console.log(`✅ Aadhaar ${aadhaar_number} verified successfully`);
+        
         res.json({
             success: true,
-            message: 'Aadhaar verified successfully',
-            verifiedAt: new Date().toISOString()
+            message: 'Aadhaar verified successfully!',
+            verifiedAt: new Date().toISOString(),
+            aadhaar_number: aadhaar_number
         });
         
     } catch (error) {
-        console.error('Error verifying Aadhaar OTP:', error);
+        console.error('❌ Error verifying Aadhaar OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to verify Aadhaar OTP',
+            message: 'Failed to verify Aadhaar OTP. Please try again.',
             error: error.message 
         });
     }
 });
 
-// User registration endpoints
+// ==================== USER REGISTRATION ENDPOINTS ====================
+
+// Consumer Registration
 app.post('/api/register/consumer', (req, res) => {
     try {
-        const { username, email, mobile, password } = req.body;
+        const { username, email, mobile, password, profile_photo_url } = req.body;
         
-        console.log('Consumer registration:', { username, email, mobile });
+        console.log('👤 Consumer registration for:', username, email);
         
-        if (!username || !email || !mobile || !password) {
+        // Validation
+        if (!username || username.length < 3) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'All fields are required' 
+                message: 'Username must be at least 3 characters long' 
             });
         }
+        
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Valid email address is required' 
+            });
+        }
+        
+        if (!mobile || mobile.length !== 10) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Valid 10-digit mobile number is required' 
+            });
+        }
+        
+        if (!password || password.length < 6) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Password must be at least 6 characters long' 
+            });
+        }
+        
+        // Simulate successful registration
+        const userId = 'CONS_' + Date.now().toString(36).toUpperCase();
+        
+        console.log(`✅ Consumer account created: ${userId} for ${username}`);
         
         res.json({
             success: true,
             message: 'Consumer account created successfully!',
             user: { 
-                username, 
-                email, 
-                mobile,
-                id: 'user_' + Date.now().toString(),
-                created: new Date().toISOString()
+                id: userId,
+                username: username, 
+                email: email, 
+                mobile: mobile,
+                profile_photo_url: profile_photo_url || null,
+                user_type: 'consumer',
+                created_at: new Date().toISOString(),
+                status: 'active'
             }
         });
         
     } catch (error) {
-        console.error('Error registering consumer:', error);
+        console.error('❌ Error registering consumer:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Registration failed.',
+            message: 'Registration failed. Please try again.',
             error: error.message 
         });
     }
 });
 
+// Farmer Registration
 app.post('/api/register/farmer', (req, res) => {
     try {
         const { 
             username, email, aadhaar_number, mobile, password,
-            farm_name, farm_size, specialization
+            profile_photo_url, farm_name, farm_size, specialization,
+            certifications, village, taluka, district, state, pin_code,
+            account_holder_name, account_number, bank_name, ifsc_code,
+            branch_name, aadhaar_verified, mobile_verified
         } = req.body;
         
-        console.log('Farmer registration:', { 
-            username, email, aadhaar_number, mobile, farm_name 
-        });
+        console.log('👨‍🌾 Farmer registration for:', username, farm_name);
         
-        if (!username || !email || !aadhaar_number || !mobile || !password || !farm_name) {
+        // Basic validation
+        if (!username || username.length < 3) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'All required fields must be filled' 
+                message: 'Username must be at least 3 characters long' 
             });
         }
         
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Valid email address is required' 
+            });
+        }
+        
+        if (!aadhaar_number || aadhaar_number.length !== 12) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Valid 12-digit Aadhaar number is required' 
+            });
+        }
+        
+        if (!mobile || mobile.length !== 10) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Valid 10-digit mobile number is required' 
+            });
+        }
+        
+        if (!password || password.length < 6) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Password must be at least 6 characters long' 
+            });
+        }
+        
+        if (!farm_name) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Farm name is required' 
+            });
+        }
+        
+        // Simulate successful registration
+        const farmerId = 'FARM_' + Date.now().toString(36).toUpperCase();
+        
+        console.log(`✅ Farmer account created: ${farmerId} for ${username}`);
+        
         res.json({
             success: true,
-            message: 'Farmer account created successfully!',
-            user: { 
-                username, 
-                email, 
-                mobile, 
-                farm_name,
-                aadhaar_number,
-                id: 'farmer_' + Date.now().toString(),
-                created: new Date().toISOString(),
+            message: 'Farmer account created successfully! Your account will be verified within 24-48 hours.',
+            farmer: { 
+                id: farmerId,
+                username: username, 
+                email: email, 
+                mobile: mobile,
+                aadhaar_number: aadhaar_number,
+                profile_photo_url: profile_photo_url || null,
+                farm_details: {
+                    farm_name: farm_name,
+                    farm_size: farm_size || 0,
+                    specialization: specialization || 'Not specified',
+                    certifications: certifications || [],
+                    location: {
+                        village: village || '',
+                        taluka: taluka || '',
+                        district: district || '',
+                        state: state || '',
+                        pin_code: pin_code || ''
+                    }
+                },
+                bank_details: {
+                    account_holder_name: account_holder_name || '',
+                    account_number: account_number || '',
+                    bank_name: bank_name || '',
+                    ifsc_code: ifsc_code || '',
+                    branch_name: branch_name || ''
+                },
+                verification_status: {
+                    aadhaar_verified: aadhaar_verified || false,
+                    mobile_verified: mobile_verified || false,
+                    account_verified: 'pending'
+                },
+                user_type: 'farmer',
+                created_at: new Date().toISOString(),
                 status: 'pending_verification'
             }
         });
         
     } catch (error) {
-        console.error('Error registering farmer:', error);
+        console.error('❌ Error registering farmer:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Registration failed.',
+            message: 'Registration failed. Please try again.',
             error: error.message 
         });
     }
 });
 
-// Upload photo endpoint
+// ==================== PHOTO UPLOAD ENDPOINT ====================
+
 app.post('/api/upload-photo', (req, res) => {
     try {
         const { imageData, userType } = req.body;
         
-        console.log('Photo upload request for:', userType);
+        console.log('📸 Photo upload for:', userType);
         
         if (!imageData) {
             return res.status(400).json({ 
@@ -390,35 +516,130 @@ app.post('/api/upload-photo', (req, res) => {
             });
         }
         
-        const mockPhotoUrl = `https://api.dicebear.com/7.x/avatars/svg?seed=${userType}_${Date.now()}`;
+        // Simulate photo upload and return a mock URL
+        // In production, you would upload to cloud storage like S3, Cloudinary, etc.
+        const timestamp = Date.now();
+        const mockPhotoUrl = `https://api.dicebear.com/7.x/avatars/svg?seed=${userType}_${timestamp}`;
+        
+        console.log(`✅ Photo uploaded successfully for ${userType}`);
         
         res.json({
             success: true,
+            message: 'Profile photo uploaded successfully!',
             photoUrl: mockPhotoUrl,
-            uploadedAt: new Date().toISOString()
+            uploadedAt: new Date().toISOString(),
+            userType: userType
         });
         
     } catch (error) {
-        console.error('Error handling photo upload:', error);
+        console.error('❌ Error handling photo upload:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to process photo',
+            message: 'Failed to upload photo. Please try again.',
             error: error.message 
         });
     }
 });
 
-// Test endpoint
-app.post('/api/test', (req, res) => {
+// ==================== TEST ENDPOINTS ====================
+
+// Simple test endpoint
+app.get('/api/test', (req, res) => {
     res.json({
         success: true,
-        message: 'API is working!',
-        timestamp: new Date().toISOString(),
-        data: req.body,
+        message: 'FarmTrials API is working! 🚀',
         server: 'Render',
-        cors: 'enabled'
+        timestamp: new Date().toISOString(),
+        cors: 'enabled',
+        client_ip: req.ip,
+        user_agent: req.headers['user-agent']
     });
 });
+
+// CORS test endpoint
+app.get('/api/cors-test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'CORS is working correctly! ✅',
+        origin: req.headers.origin || 'No origin header',
+        allowed: true,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// ==================== ROOT ENDPOINT ====================
+
+app.get('/', (req, res) => {
+    res.json({ 
+        server: 'FarmTrials Registration API',
+        version: '1.0.0',
+        status: 'operational',
+        documentation: {
+            health_check: 'GET /health',
+            mobile_otp: {
+                send: 'POST /api/mobile/send-otp',
+                verify: 'POST /api/mobile/verify'
+            },
+            aadhaar_otp: {
+                send: 'POST /api/aadhaar/send-otp',
+                verify: 'POST /api/aadhaar/verify'
+            },
+            registration: {
+                consumer: 'POST /api/register/consumer',
+                farmer: 'POST /api/register/farmer'
+            },
+            upload: 'POST /api/upload-photo',
+            test: 'GET /api/test',
+            cors_test: 'GET /api/cors-test'
+        },
+        cors: {
+            enabled: true,
+            allowed_origins: [
+                'https://unobtrix.netlify.app',
+                'http://localhost:3000',
+                'http://localhost:5500'
+            ]
+        }
+    });
+});
+
+// ==================== ERROR HANDLING ====================
+
+// 404 Handler
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Endpoint not found',
+        path: req.path,
+        method: req.method,
+        available_endpoints: [
+            '/health',
+            '/api/mobile/send-otp',
+            '/api/mobile/verify',
+            '/api/aadhaar/send-otp',
+            '/api/aadhaar/verify',
+            '/api/register/consumer',
+            '/api/register/farmer',
+            '/api/upload-photo',
+            '/api/test',
+            '/api/cors-test'
+        ]
+    });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error('💥 Server error:', err);
+    
+    res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// ==================== OTP CLEANUP ====================
 
 // Clean up expired OTPs every hour
 setInterval(() => {
@@ -433,57 +654,35 @@ setInterval(() => {
     }
     
     if (cleanedCount > 0) {
-        console.log(`Cleaned up ${cleanedCount} expired OTPs`);
+        console.log(`🧹 Cleaned up ${cleanedCount} expired OTPs`);
     }
-}, 60 * 60 * 1000);
+}, 60 * 60 * 1000); // Every hour
 
-// Root endpoint
-app.get('/', (req, res) => {
-    res.json({ 
-        message: 'FarmTrails OTP Server', 
-        status: 'OK',
-        cors: 'enabled',
-        endpoints: [
-            'GET /health',
-            'POST /api/mobile/send-otp',
-            'POST /api/mobile/verify',
-            'POST /api/aadhaar/send-otp',
-            'POST /api/aadhaar/verify',
-            'POST /api/register/consumer',
-            'POST /api/register/farmer',
-            'POST /api/upload-photo',
-            'POST /api/test'
-        ]
-    });
-});
-
-// Error handling
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    res.status(500).json({
-        success: false,
-        message: 'Internal server error',
-        error: err.message
-    });
-});
-
-// 404 handler
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: 'Endpoint not found',
-        path: req.path
-    });
-});
+// ==================== SERVER START ====================
 
 const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
     console.log(`
-✅ FarmTrails OTP Server
-🌐 Port: ${PORT}
-🚀 Deployed on: Render
-🔗 CORS: Enabled
-📝 Mode: ${process.env.NODE_ENV || 'development'}
-✅ Ready for frontend: https://unobtrix.netlify.app
+    🚀 FarmTrials Registration Server
+    📍 Port: ${PORT}
+    🌐 Environment: ${process.env.NODE_ENV || 'development'}
+    ✅ CORS: Enabled
+    🔗 Frontend: https://unobtrix.netlify.app
+    ⏰ Started: ${new Date().toISOString()}
+    📊 OTP Store: ${otpStore.size} entries
     `);
+    
+    console.log('\n📋 Available endpoints:');
+    console.log('   GET  /health            - Health check');
+    console.log('   POST /api/mobile/send-otp - Send mobile OTP');
+    console.log('   POST /api/mobile/verify   - Verify mobile OTP');
+    console.log('   POST /api/aadhaar/send-otp - Send Aadhaar OTP');
+    console.log('   POST /api/aadhaar/verify   - Verify Aadhaar OTP');
+    console.log('   POST /api/register/consumer - Register consumer');
+    console.log('   POST /api/register/farmer   - Register farmer');
+    console.log('   POST /api/upload-photo     - Upload profile photo');
+    console.log('   GET  /api/test           - API test endpoint');
+    console.log('   GET  /api/cors-test      - CORS test endpoint');
+    console.log('\n✅ Server ready to accept connections!\n');
 });
