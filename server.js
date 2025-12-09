@@ -1,12 +1,22 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-require('dotenv').config();
 
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: [
+        'https://farmtrials.netlify.app',  // Your Netlify frontend
+        'https://*.netlify.app',           // All Netlify sites
+        'http://localhost:3000',           // Local development
+        'http://localhost:5500'            // Live Server
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+}));
+
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -28,7 +38,7 @@ app.get('/', (req, res) => {
     res.json({ 
         message: 'FarmTrails OTP Server', 
         status: 'OK',
-        note: 'This server generates OTPs for verification (no SMS sent)'
+        note: 'This server generates OTPs for verification'
     });
 });
 
@@ -37,7 +47,9 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        otpStoreSize: otpStore.size
+        otpStoreSize: otpStore.size,
+        server: 'Render',
+        uptime: process.uptime()
     });
 });
 
@@ -46,7 +58,6 @@ app.post('/api/mobile/send-otp', (req, res) => {
     try {
         const { mobile } = req.body;
         
-        // Log the request
         console.log('OTP request for mobile:', mobile);
         
         if (!mobile) {
@@ -56,11 +67,9 @@ app.post('/api/mobile/send-otp', (req, res) => {
             });
         }
         
-        // Simple validation - accept any mobile for testing
         const otp = generateOTP();
         const expiryTime = Date.now() + 10 * 60 * 1000; // 10 minutes
         
-        // Store OTP
         otpStore.set(mobile, { 
             otp, 
             expiry: expiryTime,
@@ -69,10 +78,9 @@ app.post('/api/mobile/send-otp', (req, res) => {
         
         console.log(`Generated OTP for ${mobile}: ${otp} (Valid for 10 minutes)`);
         
-        // Return OTP in response
         return res.json({
             success: true,
-            message: 'OTP generated successfully. Please enter the OTP shown below.',
+            message: 'OTP generated successfully.',
             otp: otp,
             expiry: '10 minutes',
             timestamp: new Date().toISOString(),
@@ -127,7 +135,6 @@ app.post('/api/mobile/verify', (req, res) => {
             });
         }
         
-        // OTP verified successfully
         otpStore.delete(mobile);
         
         res.json({
@@ -149,9 +156,9 @@ app.post('/api/mobile/verify', (req, res) => {
 // Aadhaar OTP endpoints
 app.post('/api/aadhaar/send-otp', (req, res) => {
     try {
-        const { aadhaar_number, mobile } = req.body;
+        const { aadhaar_number } = req.body;
         
-        console.log('Aadhaar OTP request:', { aadhaar_number, mobile });
+        console.log('Aadhaar OTP request:', { aadhaar_number });
         
         if (!aadhaar_number) {
             return res.status(400).json({ 
@@ -163,7 +170,6 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
         const otp = generateOTP();
         const expiryTime = Date.now() + 10 * 60 * 1000;
         
-        // Store Aadhaar OTP
         otpStore.set(`aadhaar_${aadhaar_number}`, { 
             otp, 
             expiry: expiryTime,
@@ -174,7 +180,7 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
         
         return res.json({
             success: true,
-            message: 'Aadhaar OTP generated successfully. Please enter the OTP shown below.',
+            message: 'Aadhaar OTP generated successfully.',
             otp: otp,
             expiry: '10 minutes',
             timestamp: new Date().toISOString(),
@@ -228,7 +234,6 @@ app.post('/api/aadhaar/verify', (req, res) => {
             });
         }
         
-        // OTP verified successfully
         otpStore.delete(`aadhaar_${aadhaar_number}`);
         
         res.json({
@@ -247,14 +252,13 @@ app.post('/api/aadhaar/verify', (req, res) => {
     }
 });
 
-// User registration endpoints (Simple mock)
+// User registration endpoints
 app.post('/api/register/consumer', (req, res) => {
     try {
         const { username, email, mobile, password } = req.body;
         
         console.log('Consumer registration:', { username, email, mobile });
         
-        // Validate required fields
         if (!username || !email || !mobile || !password) {
             return res.status(400).json({ 
                 success: false, 
@@ -262,10 +266,9 @@ app.post('/api/register/consumer', (req, res) => {
             });
         }
         
-        // Mock registration success
         res.json({
             success: true,
-            message: 'Consumer account created successfully! You can now login.',
+            message: 'Consumer account created successfully!',
             user: { 
                 username, 
                 email, 
@@ -279,7 +282,7 @@ app.post('/api/register/consumer', (req, res) => {
         console.error('Error registering consumer:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Registration failed. Please try again.',
+            message: 'Registration failed.',
             error: error.message 
         });
     }
@@ -296,7 +299,6 @@ app.post('/api/register/farmer', (req, res) => {
             username, email, aadhaar_number, mobile, farm_name 
         });
         
-        // Validate required fields
         if (!username || !email || !aadhaar_number || !mobile || !password || !farm_name) {
             return res.status(400).json({ 
                 success: false, 
@@ -306,7 +308,7 @@ app.post('/api/register/farmer', (req, res) => {
         
         res.json({
             success: true,
-            message: 'Farmer account created successfully! Your account will be verified within 24 hours.',
+            message: 'Farmer account created successfully!',
             user: { 
                 username, 
                 email, 
@@ -323,13 +325,13 @@ app.post('/api/register/farmer', (req, res) => {
         console.error('Error registering farmer:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Registration failed. Please try again.',
+            message: 'Registration failed.',
             error: error.message 
         });
     }
 });
 
-// Upload photo endpoint (mock)
+// Upload photo endpoint
 app.post('/api/upload-photo', (req, res) => {
     try {
         const { imageData, userType } = req.body;
@@ -343,7 +345,6 @@ app.post('/api/upload-photo', (req, res) => {
             });
         }
         
-        // Generate a mock avatar URL (simpler version)
         const mockPhotoUrl = `https://api.dicebear.com/7.x/avatars/svg?seed=${userType}_${Date.now()}`;
         
         res.json({
@@ -368,7 +369,8 @@ app.post('/api/test', (req, res) => {
         success: true,
         message: 'API is working!',
         timestamp: new Date().toISOString(),
-        data: req.body
+        data: req.body,
+        server: 'Render'
     });
 });
 
@@ -389,13 +391,13 @@ setInterval(() => {
     }
 }, 60 * 60 * 1000);
 
-// Error handling middleware
+// Error handling
 app.use((err, req, res, next) => {
     console.error('Server error:', err);
     res.status(500).json({
         success: false,
         message: 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        error: err.message
     });
 });
 
@@ -413,8 +415,7 @@ app.listen(PORT, () => {
     console.log(`
 ✅ FarmTrails OTP Server
 🌐 Port: ${PORT}
-🔗 URL: http://localhost:${PORT}
-📝 Mode: Development (OTPs returned in response)
-📊 OTP Store: Ready
+🚀 Deployed on: Render
+📝 Mode: ${process.env.NODE_ENV || 'development'}
     `);
 });
