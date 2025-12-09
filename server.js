@@ -4,22 +4,75 @@ const bodyParser = require('body-parser');
 
 const app = express();
 
-// Middleware
+// ==================== CORS FIX ====================
+// Enable CORS for all routes
 app.use(cors({
     origin: [
-        'https://unobtrix.netlify.app/',  // Your Netlify frontend
-        'https://unobtrix.netlify.app/signup',  // All Netlify sites
-        'http://localhost:3000',           // Local development
-        'http://localhost:5500'            // Live Server
+        'https://unobtrix.netlify.app/',      // Your exact Netlify URL
+        'https://unobtrix.netlify.app/signup',             // All Netlify subdomains
+        'http://localhost:3000',
+        'http://localhost:5500',
+        'http://127.0.0.1:5500',
+        'https://127.0.0.1:5500'
     ],
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization', 
+        'Accept',
+        'Origin',
+        'X-Requested-With',
+        'X-CSRF-Token'
+    ],
+    exposedHeaders: ['Content-Length', 'Content-Type'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
 
+// Handle preflight requests explicitly
+app.options('*', cors());  // Enable preflight for all routes
+// ==================================================
+
+// Body parser
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
+// Request logging
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    console.log('Origin:', req.headers.origin || 'No origin');
+    console.log('Headers:', req.headers);
+    next();
+});
+
+// Add CORS headers to every response (additional safety)
+app.use((req, res, next) => {
+    const allowedOrigins = [
+        'https://unobtrix.netlify.app',
+        'https://*.netlify.app',
+        'http://localhost:3000',
+        'http://localhost:5500'
+    ];
+    
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin) || 
+        (origin && origin.includes('.netlify.app'))) {
+        res.header('Access-Control-Allow-Origin', origin);
+    }
+    
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    
+    next();
+});
+
+// ==================== EXISTING ROUTES ====================
 // In-memory storage for OTPs
 const otpStore = new Map();
 
@@ -33,15 +86,6 @@ function generateOTP(length = 6) {
     return otp;
 }
 
-// Routes
-app.get('/', (req, res) => {
-    res.json({ 
-        message: 'FarmTrails OTP Server', 
-        status: 'OK',
-        note: 'This server generates OTPs for verification'
-    });
-});
-
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ 
@@ -49,7 +93,8 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         otpStoreSize: otpStore.size,
         server: 'Render',
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        cors: 'enabled'
     });
 });
 
@@ -68,7 +113,7 @@ app.post('/api/mobile/send-otp', (req, res) => {
         }
         
         const otp = generateOTP();
-        const expiryTime = Date.now() + 10 * 60 * 1000; // 10 minutes
+        const expiryTime = Date.now() + 10 * 60 * 1000;
         
         otpStore.set(mobile, { 
             otp, 
@@ -370,7 +415,8 @@ app.post('/api/test', (req, res) => {
         message: 'API is working!',
         timestamp: new Date().toISOString(),
         data: req.body,
-        server: 'Render'
+        server: 'Render',
+        cors: 'enabled'
     });
 });
 
@@ -390,6 +436,26 @@ setInterval(() => {
         console.log(`Cleaned up ${cleanedCount} expired OTPs`);
     }
 }, 60 * 60 * 1000);
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'FarmTrails OTP Server', 
+        status: 'OK',
+        cors: 'enabled',
+        endpoints: [
+            'GET /health',
+            'POST /api/mobile/send-otp',
+            'POST /api/mobile/verify',
+            'POST /api/aadhaar/send-otp',
+            'POST /api/aadhaar/verify',
+            'POST /api/register/consumer',
+            'POST /api/register/farmer',
+            'POST /api/upload-photo',
+            'POST /api/test'
+        ]
+    });
+});
 
 // Error handling
 app.use((err, req, res, next) => {
@@ -416,6 +482,8 @@ app.listen(PORT, () => {
 ✅ FarmTrails OTP Server
 🌐 Port: ${PORT}
 🚀 Deployed on: Render
+🔗 CORS: Enabled
 📝 Mode: ${process.env.NODE_ENV || 'development'}
+✅ Ready for frontend: https://unobtrix.netlify.app
     `);
 });
