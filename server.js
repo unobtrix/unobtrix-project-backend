@@ -7,8 +7,8 @@ const app = express();
 // Middleware
 app.use(cors({
     origin: [
-        'https://farmtrials.netlify.app',  // Your Netlify frontend
-        'https://*.netlify.app',           // All Netlify sites
+        'https://unobtrix.netlify.app/',  // Your Netlify frontend
+        'https://unobtrix.netlify.app/signup',  // All Netlify sites
         'http://localhost:3000',           // Local development
         'http://localhost:5500'            // Live Server
     ],
