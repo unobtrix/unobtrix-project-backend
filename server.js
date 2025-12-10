@@ -13,7 +13,6 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 console.log('🔗 Supabase connected');
-console.log('📦 Storage: Using "profile-photos" bucket');
 // ================================================================
 
 // ==================== CORS CONFIGURATION ====================
@@ -93,38 +92,139 @@ async function checkUserExists(email, mobile) {
     }
 }
 
+// ==================== CHECK AND CREATE STORAGE BUCKET ====================
+async function checkAndCreateBucket() {
+    try {
+        console.log('🔍 Checking storage bucket...');
+        
+        // List buckets
+        const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+        
+        if (listError) {
+            console.error('❌ Error listing buckets:', listError);
+            return;
+        }
+        
+        console.log('📦 Available buckets:', buckets.map(b => b.name));
+        
+        const bucketName = 'profile-photos';
+        const bucketExists = buckets.some(b => b.name === bucketName);
+        
+        if (!bucketExists) {
+            console.log('🔄 Creating bucket:', bucketName);
+            
+            const { data: newBucket, error: createError } = await supabase.storage.createBucket(bucketName, {
+                public: true,
+                fileSizeLimit: 52428800, // 50MB
+                allowedMimeTypes: ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/webp']
+            });
+            
+            if (createError) {
+                console.error('❌ Failed to create bucket:', createError);
+            } else {
+                console.log('✅ Bucket created successfully:', bucketName);
+                
+                // Update bucket policy to be public
+                const { error: policyError } = await supabase.storage.updateBucket(bucketName, {
+                    public: true
+                });
+                
+                if (policyError) {
+                    console.error('❌ Failed to update bucket policy:', policyError);
+                } else {
+                    console.log('✅ Bucket set to public');
+                }
+            }
+        } else {
+            console.log('✅ Bucket already exists:', bucketName);
+            
+            // Check bucket details
+            const { data: bucketDetails, error: detailsError } = await supabase.storage.getBucket(bucketName);
+            
+            if (detailsError) {
+                console.error('❌ Error getting bucket details:', detailsError);
+            } else {
+                console.log('📋 Bucket details:', {
+                    name: bucketDetails.name,
+                    public: bucketDetails.public,
+                    fileSizeLimit: bucketDetails.file_size_limit,
+                    allowedMimeTypes: bucketDetails.allowed_mime_types
+                });
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error in checkAndCreateBucket:', error);
+    }
+}
+
 // ==================== IMAGE UPLOAD TO SUPABASE STORAGE ====================
 async function uploadToSupabaseStorage(base64Image, userType, userId) {
     try {
-        if (!base64Image || !base64Image.startsWith('data:image/')) {
-            console.error('Invalid image data');
+        if (!base64Image) {
+            console.error('❌ No image data provided');
+            return null;
+        }
+        
+        if (!base64Image.startsWith('data:image/')) {
+            console.error('❌ Invalid image format. Must be base64 image data.');
+            console.error('Received:', base64Image.substring(0, 100));
             return null;
         }
 
         // Generate unique filename
         const timestamp = Date.now();
-        const fileExt = base64Image.split(';')[0].split('/')[1] || 'jpg';
-        const filename = `${userType}_${userId}_${timestamp}.${fileExt}`;
+        const randomString = Math.random().toString(36).substring(2, 15);
+        const fileExt = base64Image.split(';')[0].split('/')[1] || 'png';
+        const filename = `${userType}_${userId}_${timestamp}_${randomString}.${fileExt}`;
         const bucketName = 'profile-photos';
 
         console.log(`📤 Uploading to Supabase Storage: ${bucketName}/${filename}`);
+        console.log(`📊 Image size: ${base64Image.length} characters (base64)`);
 
         // Convert base64 to buffer
         const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
+        
+        console.log(`📊 Buffer size: ${buffer.length} bytes`);
 
         // Upload to Supabase Storage
         const { data, error } = await supabase.storage
             .from(bucketName)
             .upload(filename, buffer, {
                 contentType: `image/${fileExt}`,
-                upsert: true,
+                upsert: false,
                 cacheControl: '3600'
             });
 
         if (error) {
             console.error('❌ Storage upload error:', error);
-            return null;
+            
+            // If bucket doesn't exist, create it
+            if (error.message && error.message.includes('bucket') && error.message.includes('not found')) {
+                console.log('🔄 Bucket not found, creating...');
+                await checkAndCreateBucket();
+                
+                // Retry upload after creating bucket
+                console.log('🔄 Retrying upload...');
+                const { data: retryData, error: retryError } = await supabase.storage
+                    .from(bucketName)
+                    .upload(filename, buffer, {
+                        contentType: `image/${fileExt}`,
+                        upsert: false,
+                        cacheControl: '3600'
+                    });
+                
+                if (retryError) {
+                    console.error('❌ Retry upload failed:', retryError);
+                    return null;
+                }
+                
+                console.log('✅ Upload successful on retry');
+            } else {
+                return null;
+            }
+        } else {
+            console.log('✅ Upload successful');
         }
 
         // Get public URL
@@ -132,13 +232,14 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
             .from(bucketName)
             .getPublicUrl(filename);
 
-        console.log('✅ Image uploaded successfully:', urlData.publicUrl);
-        console.log('📊 Image size:', buffer.length, 'bytes');
+        console.log('✅ Image uploaded successfully to Supabase Storage');
+        console.log('🔗 Public URL:', urlData.publicUrl);
 
         return urlData.publicUrl;
 
     } catch (error) {
         console.error('❌ Error uploading to storage:', error);
+        console.error('Stack trace:', error.stack);
         return null;
     }
 }
@@ -152,20 +253,32 @@ async function insertConsumer(userData) {
         let profilePhotoUrl = null;
         
         // Upload image to Supabase Storage if provided
-        if (userData.profile_photo_base64 && userData.profile_photo_base64.startsWith('data:image/')) {
+        const photoData = userData.profile_photo_base64 || userData.profile_photo_url;
+        
+        if (photoData && photoData.startsWith('data:image/')) {
             console.log('📸 Processing profile photo upload...');
+            console.log('Base64 data length:', photoData.length);
+            console.log('Base64 starts with:', photoData.substring(0, 50));
             
             // Use username as temporary ID for upload
             const tempUserId = userData.username.replace(/[^a-zA-Z0-9]/g, '_');
             profilePhotoUrl = await uploadToSupabaseStorage(
-                userData.profile_photo_base64,
+                photoData,
                 'consumer',
                 tempUserId
             );
             
             if (!profilePhotoUrl) {
                 console.log('⚠️ Photo upload failed, continuing without photo');
+            } else {
+                console.log('✅ Photo uploaded to:', profilePhotoUrl);
             }
+        } else if (photoData && photoData.includes('http')) {
+            // If it's already a URL, use it directly
+            profilePhotoUrl = photoData;
+            console.log('✅ Using existing photo URL:', profilePhotoUrl);
+        } else if (photoData) {
+            console.log('⚠️ Invalid photo data format:', photoData.substring(0, 100));
         }
         
         console.log('💾 Inserting consumer into database...');
@@ -189,6 +302,7 @@ async function insertConsumer(userData) {
         }
 
         console.log('✅ Consumer saved successfully! ID:', data[0].id);
+        console.log('📸 Photo URL in database:', data[0].profile_photo_url);
         return { success: true, data: data[0] };
         
     } catch (error) {
@@ -205,19 +319,28 @@ async function insertFarmer(farmerData) {
         let profilePhotoUrl = null;
         
         // Upload image to Supabase Storage if provided
-        if (farmerData.profile_photo_base64 && farmerData.profile_photo_base64.startsWith('data:image/')) {
+        const photoData = farmerData.profile_photo_base64 || farmerData.profile_photo_url;
+        
+        if (photoData && photoData.startsWith('data:image/')) {
             console.log('📸 Processing farmer profile photo upload...');
+            console.log('Base64 data length:', photoData.length);
             
             const tempUserId = farmerData.username.replace(/[^a-zA-Z0-9]/g, '_');
             profilePhotoUrl = await uploadToSupabaseStorage(
-                farmerData.profile_photo_base64,
+                photoData,
                 'farmer',
                 tempUserId
             );
             
             if (!profilePhotoUrl) {
                 console.log('⚠️ Farmer photo upload failed, continuing without photo');
+            } else {
+                console.log('✅ Farmer photo uploaded to:', profilePhotoUrl);
             }
+        } else if (photoData && photoData.includes('http')) {
+            // If it's already a URL, use it directly
+            profilePhotoUrl = photoData;
+            console.log('✅ Using existing farmer photo URL:', profilePhotoUrl);
         }
 
         // Convert certifications to array
@@ -269,6 +392,7 @@ async function insertFarmer(farmerData) {
         }
 
         console.log('✅ Farmer saved successfully! ID:', data[0].id);
+        console.log('📸 Photo URL in database:', data[0].profile_photo_url);
         return { success: true, data: data[0] };
         
     } catch (error) {
@@ -500,18 +624,22 @@ app.post('/api/aadhaar/verify', (req, res) => {
 // ==================== PHOTO UPLOAD ENDPOINT (STANDALONE) ====================
 app.post('/api/upload-photo', async (req, res) => {
     try {
-        const { imageData, userType, userId } = req.body;
+        // Accept both parameter names
+        let { imageData, profile_photo_base64, userType, userId } = req.body;
+        
+        // Use imageData if provided, otherwise fallback to profile_photo_base64
+        const photoData = imageData || profile_photo_base64;
         
         console.log('📸 Photo upload request for:', userType, 'User ID:', userId || 'temp');
         
-        if (!imageData) {
+        if (!photoData) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'No image data provided' 
             });
         }
         
-        if (!imageData.startsWith('data:image/')) {
+        if (!photoData.startsWith('data:image/')) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'Invalid image format. Must be base64 image data.' 
@@ -520,7 +648,7 @@ app.post('/api/upload-photo', async (req, res) => {
         
         // Upload to Supabase Storage
         const photoUrl = await uploadToSupabaseStorage(
-            imageData, 
+            photoData, 
             userType, 
             userId || 'temp_' + Date.now()
         );
@@ -550,12 +678,40 @@ app.post('/api/upload-photo', async (req, res) => {
     }
 });
 
+// ==================== TEST UPLOAD ENDPOINT ====================
+app.post('/api/test-upload', async (req, res) => {
+    try {
+        const { base64Image } = req.body;
+        
+        if (!base64Image) {
+            return res.status(400).json({ success: false, message: 'No image provided' });
+        }
+        
+        const url = await uploadToSupabaseStorage(base64Image, 'test', 'testuser');
+        
+        if (!url) {
+            return res.status(500).json({ success: false, message: 'Upload failed' });
+        }
+        
+        res.json({ success: true, url: url });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ==================== REGISTRATION ENDPOINTS ====================
 app.post('/api/register/consumer', async (req, res) => {
     try {
-        const { username, email, mobile, password, profile_photo_base64 } = req.body;
+        const { username, email, mobile, password, profile_photo_base64, profile_photo_url } = req.body;
         
         console.log('👤 Consumer registration request:', { username, email, mobile });
+        console.log('📸 Photo data present:', !!(profile_photo_base64 || profile_photo_url));
+        console.log('Photo data type:', profile_photo_base64 ? 'base64' : profile_photo_url ? 'url' : 'none');
+        
+        if (profile_photo_base64) {
+            console.log('Base64 starts with:', profile_photo_base64.substring(0, 50));
+            console.log('Base64 length:', profile_photo_base64.length);
+        }
         
         // Validation
         if (!username || username.length < 3) {
@@ -601,7 +757,8 @@ app.post('/api/register/consumer', async (req, res) => {
             email,
             mobile,
             password,
-            profile_photo_base64
+            profile_photo_base64,
+            profile_photo_url
         });
         
         if (!result.success) {
@@ -645,13 +802,14 @@ app.post('/api/register/farmer', async (req, res) => {
     try {
         const { 
             username, email, aadhaar_number, mobile, password,
-            profile_photo_base64, farm_name, farm_size, specialization,
+            profile_photo_base64, profile_photo_url, farm_name, farm_size, specialization,
             certifications, village, taluka, district, state, pin_code,
             account_holder_name, account_number, bank_name, ifsc_code,
             branch_name, aadhaar_verified, mobile_verified
         } = req.body;
         
         console.log('👨‍🌾 Farmer registration request:', { username, email, farm_name });
+        console.log('📸 Photo data present:', !!(profile_photo_base64 || profile_photo_url));
         
         // Validation
         if (!username || username.length < 3) {
@@ -713,6 +871,7 @@ app.post('/api/register/farmer', async (req, res) => {
             mobile,
             password,
             profile_photo_base64,
+            profile_photo_url,
             farm_name,
             farm_size,
             specialization,
@@ -831,7 +990,7 @@ app.get('/api/debug/users', async (req, res) => {
 app.get('/', (req, res) => {
     res.json({ 
         server: 'FarmTrials Registration API',
-        version: '2.0',
+        version: '3.0',
         status: 'operational',
         timestamp: new Date().toISOString(),
         features: {
@@ -847,6 +1006,7 @@ app.get('/', (req, res) => {
             register_consumer: 'POST /api/register/consumer',
             register_farmer: 'POST /api/register/farmer',
             upload_photo: 'POST /api/upload-photo',
+            test_upload: 'POST /api/test-upload',
             mobile_otp: {
                 send: 'POST /api/mobile/send-otp',
                 verify: 'POST /api/mobile/verify'
@@ -904,28 +1064,31 @@ setInterval(() => {
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`
-    🚀 FarmTrials Backend Server v2.0
+    🚀 FarmTrials Backend Server v3.0
     📍 Port: ${PORT}
     🔗 Supabase: Connected
-    📦 Storage: Using "profile-photos" bucket
-    📸 Images: Stored as URLs in cloud storage
+    ⏰ Started: ${new Date().toISOString()}
+    `);
+    
+    // Check and create storage bucket on startup
+    await checkAndCreateBucket();
+    
+    console.log(`
+    📦 Storage: Checking "profile-photos" bucket...
+    📸 Images: Will be stored as URLs in cloud storage
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
-    ⏰ Started: ${new Date().toISOString()}
     
-    ✅ Ready for production!
-    ✅ Images stored efficiently in Supabase Storage
-    ✅ Database stores only URLs (not base64)
-    ✅ All endpoints working
-    ✅ CORS properly configured
+    ✅ Server is running!
     
     📋 Test endpoints:
        GET  /health                    - Health check
        POST /api/register/consumer     - Register consumer
        POST /api/register/farmer       - Register farmer
        POST /api/upload-photo          - Upload photo
+       POST /api/test-upload           - Test upload
        GET  /api/debug/storage         - Check storage
        GET  /api/debug/users           - Check users
     `);
