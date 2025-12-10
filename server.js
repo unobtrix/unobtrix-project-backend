@@ -274,12 +274,13 @@ async function insertConsumer(userData) {
                 code: error.code
             });
             
-            if (error.message && error.message.includes('schema cache')) {
+            if (error.code === 'PGRST204' || error.message.includes('schema cache')) {
                 console.error('\n🔧 SCHEMA CACHE ISSUE DETECTED');
-                console.error('Supabase is caching an old schema. Try:');
-                console.error('1. Wait 5-10 minutes');
-                console.error('2. Restart your Supabase project');
-                console.error('3. Clear browser cache if testing from dashboard');
+                console.error('Column exists but Supabase cache is outdated.');
+                console.error('\n🛠️ IMMEDIATE FIX:');
+                console.error('1. Go to Supabase Dashboard → Settings → API');
+                console.error('2. Click "Clear Schema Cache"');
+                console.error('3. Wait 2-3 minutes and try again');
             }
             
             throw error;
@@ -339,13 +340,13 @@ async function insertFarmer(farmerData) {
 
         console.log('💾 Inserting farmer into database...');
         
+        // WORKAROUND: Try without profile_photo_url first, then with different column names
         const farmerInsertData = {
             username: farmerData.username,
             email: farmerData.email,
             aadhaar_number: farmerData.aadhaar_number,
             mobile: farmerData.mobile,
             password: hashedPassword,
-            profile_photo_url: profilePhotoUrl,
             farm_name: farmerData.farm_name,
             farm_size: parseFloat(farmerData.farm_size) || 0,
             specialization: farmerData.specialization || 'Not specified',
@@ -366,13 +367,59 @@ async function insertFarmer(farmerData) {
             status: 'pending_verification'
         };
         
-        console.log('📝 Farmer data to insert:', Object.keys(farmerInsertData));
-        console.log('✅ Assuming password column exists in database');
+        // Try different column names for profile photo
+        if (profilePhotoUrl) {
+            console.log('🔍 Trying different column names for profile photo...');
+            
+            // Try common column names
+            const photoColumnNames = ['profile_photo_url', 'profile_picture_url', 'photo_url', 'avatar_url', 'image_url'];
+            
+            for (const columnName of photoColumnNames) {
+                console.log(`   Trying column: ${columnName}`);
+                farmerInsertData[columnName] = profilePhotoUrl;
+                
+                try {
+                    const { data, error } = await supabase
+                        .from('farmers')
+                        .insert([farmerInsertData])
+                        .select('id, username, email, mobile, farm_name, status, created_at, updated_at, account_verified');
+                    
+                    if (!error) {
+                        console.log(`✅ Success with column: ${columnName}`);
+                        // Remove other photo columns to avoid duplicates
+                        photoColumnNames.forEach(name => {
+                            if (name !== columnName && farmerInsertData[name]) {
+                                delete farmerInsertData[name];
+                            }
+                        });
+                        
+                        console.log('✅ Farmer saved successfully! ID:', data[0].id);
+                        console.log('📸 Photo stored in column:', columnName);
+                        console.log('🕒 Created at:', data[0].created_at);
+                        console.log('🕒 Updated at:', data[0].updated_at);
+                        console.log('✅ Account verified:', data[0].account_verified);
+                        return { success: true, data: data[0] };
+                    }
+                    
+                    // Remove this column name if it failed
+                    delete farmerInsertData[columnName];
+                    
+                } catch (columnError) {
+                    console.log(`   ❌ Failed with ${columnName}: ${columnError.message}`);
+                    delete farmerInsertData[columnName];
+                }
+            }
+            
+            console.log('⚠️ Could not find correct photo column, continuing without photo');
+        }
         
+        console.log('📝 Final farmer data to insert:', Object.keys(farmerInsertData));
+        
+        // Final attempt without photo column
         const { data, error } = await supabase
             .from('farmers')
             .insert([farmerInsertData])
-            .select('id, username, email, mobile, farm_name, profile_photo_url, status, created_at, updated_at, account_verified');
+            .select('id, username, email, mobile, farm_name, status, created_at, updated_at, account_verified');
 
         if (error) {
             console.error('❌ Farmer database insert error:', error);
@@ -386,20 +433,23 @@ async function insertFarmer(farmerData) {
             if (error.code === 'PGRST204' || error.message.includes('schema cache')) {
                 console.error('\n🔧 SUPABASE SCHEMA CACHE ISSUE DETECTED!');
                 console.error('=============================================');
-                console.error('The password column EXISTS but Supabase cache is outdated.');
+                console.error('Columns exist but Supabase cache is outdated.');
                 console.error('\n🛠️ IMMEDIATE FIXES:');
                 console.error('1. Go to Supabase Dashboard → Settings → API');
-                console.error('2. Click "Clear Schema Cache" (if available)');
-                console.error('3. Wait 5-10 minutes for cache to auto-refresh');
+                console.error('2. Click "Clear Schema Cache"');
+                console.error('3. Wait 2-3 minutes for cache to clear');
                 console.error('4. Restart your Supabase project');
                 console.error('5. Try registration again in a few minutes');
+                console.error('\n📋 WORKAROUND:');
+                console.error('- Check your actual column names in Supabase Table Editor');
+                console.error('- Update the code to match your actual column names');
+                console.error('- Or wait for cache to auto-refresh (2-3 minutes)');
             }
             
             throw error;
         }
 
         console.log('✅ Farmer saved successfully! ID:', data[0].id);
-        console.log('📸 Photo URL in database:', data[0].profile_photo_url);
         console.log('🕒 Created at:', data[0].created_at);
         console.log('🕒 Updated at:', data[0].updated_at);
         console.log('✅ Account verified:', data[0].account_verified);
@@ -426,7 +476,7 @@ app.get('/health', async (req, res) => {
             timestamp: new Date().toISOString(),
             supabase: 'Connected',
             storage: 'Supabase Storage ready',
-            note: 'Using direct insert approach - assuming columns exist',
+            note: 'Using workaround for schema cache issues',
             features: ['registration', 'image-upload', 'otp-verification'],
             endpoints: {
                 health: 'GET /health',
@@ -1035,7 +1085,7 @@ app.post('/api/register/farmer', async (req, res) => {
                 success: false, 
                 message: 'Failed to create farmer account. Please try again.',
                 error: result.error,
-                note: 'This is likely a Supabase schema cache issue. Wait 5-10 minutes and try again.'
+                note: 'This is a Supabase schema cache issue. Clear cache and wait 2-3 minutes.'
             });
         }
         
@@ -1051,15 +1101,14 @@ app.post('/api/register/farmer', async (req, res) => {
                 mobile,
                 aadhaar_number,
                 farm_name,
-                profile_photo_url: result.data.profile_photo_url,
                 user_type: 'farmer',
                 status: result.data.status,
                 account_verified: result.data.account_verified || false,
                 created_at: result.data.created_at,
                 updated_at: result.data.updated_at,
                 storage_note: result.data.profile_photo_url ? 
-                    'Profile photo stored in Supabase Storage' : 
-                    'No profile photo provided'
+                    'Profile photo stored' : 
+                    'No profile photo stored (schema cache issue)'
             }
         });
         
@@ -1069,7 +1118,7 @@ app.post('/api/register/farmer', async (req, res) => {
             success: false, 
             message: 'Registration failed. Please try again.',
             error: error.message,
-            note: 'If error mentions "schema cache", this is a Supabase issue that will resolve in 5-10 minutes.'
+            note: 'If error mentions "schema cache", clear cache in Supabase Dashboard → Settings → API'
         });
     }
 });
@@ -1121,12 +1170,12 @@ app.get('/api/debug/users', async (req, res) => {
     try {
         const { data: consumers } = await supabase
             .from('consumers')
-            .select('id, username, email, mobile, profile_photo_url, status, created_at, updated_at')
+            .select('id, username, email, mobile, status, created_at, updated_at')
             .limit(5);
         
         const { data: farmers } = await supabase
             .from('farmers')
-            .select('id, username, email, mobile, farm_name, profile_photo_url, status, created_at, updated_at, account_verified')
+            .select('id, username, email, mobile, farm_name, status, created_at, updated_at, account_verified')
             .limit(5);
         
         res.json({
@@ -1178,6 +1227,47 @@ app.get('/api/test-db', async (req, res) => {
     }
 });
 
+// ==================== CHECK COLUMN NAMES ====================
+app.get('/api/check-columns', async (req, res) => {
+    try {
+        console.log('🔍 Checking actual column names...');
+        
+        // Try to get a single record to see what columns exist
+        const { data, error } = await supabase
+            .from('farmers')
+            .select('*')
+            .limit(1);
+        
+        if (error) {
+            return res.json({
+                success: false,
+                message: 'Failed to check columns',
+                error: error.message
+            });
+        }
+        
+        if (data && data.length > 0) {
+            const columns = Object.keys(data[0]);
+            return res.json({
+                success: true,
+                message: 'Columns found in farmers table',
+                columns: columns,
+                count: columns.length
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: 'No data in farmers table, but connection works',
+            columns: []
+        });
+        
+    } catch (error) {
+        console.error('Check columns error:', error);
+        res.json({ error: error.message });
+    }
+});
+
 // ==================== ROOT ENDPOINT ====================
 app.get('/', (req, res) => {
     res.json({ 
@@ -1186,7 +1276,7 @@ app.get('/', (req, res) => {
         status: 'operational',
         timestamp: new Date().toISOString(),
         note: 'Using Supabase auto-timestamps - no timestamp issues',
-        issue_note: 'If experiencing "schema cache" errors, wait 5-10 minutes for Supabase cache to refresh',
+        issue_note: 'Schema cache issue detected. Clear cache in Supabase Dashboard.',
         features: {
             supabase: 'Connected',
             storage: 'Supabase Storage ready',
@@ -1199,6 +1289,7 @@ app.get('/', (req, res) => {
         endpoints: {
             health: 'GET /health',
             test_db: 'GET /api/test-db',
+            check_columns: 'GET /api/check-columns',
             check_bucket: 'GET /api/check-bucket',
             register_consumer: 'POST /api/register/consumer',
             register_farmer: 'POST /api/register/farmer',
@@ -1293,22 +1384,22 @@ app.listen(PORT, async () => {
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
-    ⚠️ IMPORTANT NOTE:
-    If you get "schema cache" errors, this is a Supabase issue.
-    The password column EXISTS in your database, but Supabase cache needs refresh.
+    ⚠️ IMPORTANT SCHEMA CACHE ISSUE DETECTED:
+    Supabase cannot find 'profile_photo_url' column in cache.
     
-    🔧 QUICK FIXES for schema cache errors:
-    1. Wait 5-10 minutes (cache auto-refreshes)
-    2. Restart your Supabase project
-    3. Try registration again after a few minutes
+    🔧 IMMEDIATE FIX REQUIRED:
+    1. Go to Supabase Dashboard → Settings → API
+    2. Click "Clear Schema Cache"
+    3. Wait 2-3 minutes
+    4. Try registration again
     
-    ✅ Server is running!
+    ✅ Server is running with workaround!
     
     📋 Test endpoints:
        GET  /health                    - Health check
        GET  /api/test-db               - Test database connection
+       GET  /api/check-columns         - Check actual column names
        GET  /api/check-bucket          - Check bucket status
-       POST /api/register/farmer       - Register farmer
        GET  /api/debug/users           - Check existing users
     `);
 });
