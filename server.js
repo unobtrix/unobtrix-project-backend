@@ -12,7 +12,6 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 console.log('🔗 Initializing Supabase connection...');
 console.log('URL:', supabaseUrl);
-console.log('Key present:', supabaseKey ? 'Yes' : 'No');
 
 // Initialize Supabase client
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -27,11 +26,6 @@ async function initializeSupabase() {
         
         if (error) {
             console.error('❌ Supabase connection test failed:', error.message);
-            if (error.message.includes('JWT')) {
-                console.log('💡 Issue: Invalid API key. Check your anon key.');
-            } else if (error.message.includes('relation')) {
-                console.log('💡 Issue: Table might not exist. Check table names.');
-            }
             return false;
         }
         
@@ -43,7 +37,6 @@ async function initializeSupabase() {
     }
 }
 
-// Run initialization
 initializeSupabase();
 // ================================================================
 
@@ -51,8 +44,7 @@ initializeSupabase();
 const allowedOrigins = [
     'https://unobtrix.netlify.app',
     'https://unobtrix.netlify.app/signup',
-    'https://unobtrix.netlify.app/farmerpage',
-    'https://unobtrix.netlify.app/customer',
+    'https://unobtrix.netlify.app/customer.html',
     'http://localhost:3000',
     'http://localhost:5500',
     'http://127.0.0.1:5500'
@@ -60,7 +52,6 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
         
         if (allowedOrigins.indexOf(origin) !== -1 || origin.endsWith('.netlify.app')) {
@@ -77,7 +68,6 @@ app.use(cors({
     maxAge: 86400
 }));
 
-// Handle preflight requests
 app.options('*', (req, res) => {
     const origin = req.headers.origin;
     if (allowedOrigins.includes(origin) || (origin && origin.endsWith('.netlify.app'))) {
@@ -90,15 +80,12 @@ app.options('*', (req, res) => {
     res.sendStatus(200);
 });
 
-// Body parser
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request logging
 app.use((req, res, next) => {
     console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-    console.log('Origin:', req.headers.origin || 'No origin');
-    console.log('Body:', req.method !== 'GET' ? JSON.stringify(req.body) : 'No body');
     next();
 });
 
@@ -116,7 +103,6 @@ function generateOTP(length = 6) {
 
 // ==================== SUPABASE HELPER FUNCTIONS ====================
 
-// Hash password using bcrypt
 async function hashPassword(password) {
     try {
         const salt = await bcrypt.genSalt(10);
@@ -127,15 +113,8 @@ async function hashPassword(password) {
     }
 }
 
-// Verify password
-async function verifyPassword(password, hash) {
-    return await bcrypt.compare(password, hash);
-}
-
-// Check if user exists
 async function checkUserExists(email, mobile) {
     try {
-        // Check consumers table
         const { data: consumers, error: consumerError } = await supabase
             .from('consumers')
             .select('email, mobile')
@@ -146,7 +125,6 @@ async function checkUserExists(email, mobile) {
             console.log('Consumers check error:', consumerError.message);
         }
 
-        // Check farmers table  
         const { data: farmers, error: farmerError } = await supabase
             .from('farmers')
             .select('email, mobile')
@@ -164,20 +142,24 @@ async function checkUserExists(email, mobile) {
     }
 }
 
-// Insert consumer
 async function insertConsumer(userData) {
     try {
-        console.log('Hashing password...');
-        const password_hash = await hashPassword(userData.password);
+        const hashedPassword = await hashPassword(userData.password);
         
-        console.log('Inserting into consumers table...');
+        console.log('Inserting consumer with:', {
+            username: userData.username,
+            email: userData.email,
+            mobile: userData.mobile,
+            password: '***' // Don't log actual password
+        });
+        
         const { data, error } = await supabase
             .from('consumers')
             .insert([{
                 username: userData.username,
                 email: userData.email,
                 mobile: userData.mobile,
-                password_hash: password_hash,
+                password: hashedPassword, // Using 'password' column (not password_hash)
                 profile_photo_url: userData.profile_photo_url || null,
                 status: 'active'
             }])
@@ -185,16 +167,10 @@ async function insertConsumer(userData) {
 
         if (error) {
             console.error('Supabase insert error:', error);
-            console.error('Error details:', {
-                code: error.code,
-                details: error.details,
-                hint: error.hint,
-                message: error.message
-            });
             throw error;
         }
 
-        console.log('Insert successful, data:', data);
+        console.log('✅ Insert successful, user ID:', data[0].id);
         return { success: true, data: data[0] };
     } catch (error) {
         console.error('Error in insertConsumer:', error);
@@ -202,12 +178,10 @@ async function insertConsumer(userData) {
     }
 }
 
-// Insert farmer
 async function insertFarmer(farmerData) {
     try {
-        const password_hash = await hashPassword(farmerData.password);
+        const hashedPassword = await hashPassword(farmerData.password);
         
-        // Convert certifications to array
         let certificationsArray = [];
         if (farmerData.certifications) {
             if (Array.isArray(farmerData.certifications)) {
@@ -217,6 +191,8 @@ async function insertFarmer(farmerData) {
             }
         }
 
+        console.log('Inserting farmer with farm:', farmerData.farm_name);
+        
         const { data, error } = await supabase
             .from('farmers')
             .insert([{
@@ -224,7 +200,7 @@ async function insertFarmer(farmerData) {
                 email: farmerData.email,
                 aadhaar_number: farmerData.aadhaar_number,
                 mobile: farmerData.mobile,
-                password_hash: password_hash,
+                password: hashedPassword, // Using 'password' column
                 profile_photo_url: farmerData.profile_photo_url || null,
                 farm_name: farmerData.farm_name,
                 farm_size: parseFloat(farmerData.farm_size) || 0,
@@ -252,6 +228,7 @@ async function insertFarmer(farmerData) {
             throw error;
         }
 
+        console.log('✅ Farmer insert successful, ID:', data[0].id);
         return { success: true, data: data[0] };
     } catch (error) {
         console.error('Error inserting farmer:', error);
@@ -266,10 +243,7 @@ app.get('/health', (req, res) => {
         server: 'FarmTrials Registration API',
         timestamp: new Date().toISOString(),
         supabase: 'Connected',
-        supabase_url: supabaseUrl,
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        node_version: process.version
+        uptime: process.uptime()
     });
 });
 
@@ -300,18 +274,17 @@ app.post('/api/mobile/send-otp', (req, res) => {
         
         return res.json({
             success: true,
-            message: 'OTP sent successfully to your mobile number',
+            message: 'OTP sent successfully',
             otp: otp,
             debug_otp: otp,
-            expiry: '10 minutes',
-            timestamp: new Date().toISOString()
+            expiry: '10 minutes'
         });
         
     } catch (error) {
         console.error('❌ Error generating OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to send OTP. Please try again.',
+            message: 'Failed to send OTP',
             error: error.message 
         });
     }
@@ -320,8 +293,6 @@ app.post('/api/mobile/send-otp', (req, res) => {
 app.post('/api/mobile/verify', (req, res) => {
     try {
         const { mobile, otp } = req.body;
-        
-        console.log('📱 Mobile OTP verification for:', mobile);
         
         if (!mobile || !otp) {
             return res.status(400).json({ 
@@ -335,7 +306,7 @@ app.post('/api/mobile/verify', (req, res) => {
         if (!storedData) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'No OTP found for this number. Please request a new OTP.' 
+                message: 'No OTP found. Please request a new OTP.' 
             });
         }
         
@@ -350,7 +321,7 @@ app.post('/api/mobile/verify', (req, res) => {
         if (storedData.otp !== otp) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Invalid OTP. Please check and try again.' 
+                message: 'Invalid OTP. Please try again.' 
             });
         }
         
@@ -358,15 +329,14 @@ app.post('/api/mobile/verify', (req, res) => {
         
         res.json({
             success: true,
-            message: 'Mobile number verified successfully!',
-            verifiedAt: new Date().toISOString()
+            message: 'Mobile number verified successfully!'
         });
         
     } catch (error) {
         console.error('❌ Error verifying OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to verify OTP. Please try again.',
+            message: 'Failed to verify OTP',
             error: error.message 
         });
     }
@@ -399,18 +369,17 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
         
         return res.json({
             success: true,
-            message: 'Aadhaar verification OTP sent successfully',
+            message: 'Aadhaar OTP sent successfully',
             otp: otp,
             debug_otp: otp,
-            expiry: '10 minutes',
-            timestamp: new Date().toISOString()
+            expiry: '10 minutes'
         });
         
     } catch (error) {
         console.error('❌ Error generating Aadhaar OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to send Aadhaar OTP. Please try again.',
+            message: 'Failed to send Aadhaar OTP',
             error: error.message 
         });
     }
@@ -419,8 +388,6 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
 app.post('/api/aadhaar/verify', (req, res) => {
     try {
         const { aadhaar_number, otp } = req.body;
-        
-        console.log('🆔 Aadhaar verification for:', aadhaar_number);
         
         if (!aadhaar_number || !otp) {
             return res.status(400).json({ 
@@ -434,7 +401,7 @@ app.post('/api/aadhaar/verify', (req, res) => {
         if (!storedData) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'No OTP found for this Aadhaar. Please request a new OTP.' 
+                message: 'No OTP found. Please request a new OTP.' 
             });
         }
         
@@ -449,7 +416,7 @@ app.post('/api/aadhaar/verify', (req, res) => {
         if (storedData.otp !== otp) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Invalid OTP. Please check and try again.' 
+                message: 'Invalid OTP. Please try again.' 
             });
         }
         
@@ -457,15 +424,14 @@ app.post('/api/aadhaar/verify', (req, res) => {
         
         res.json({
             success: true,
-            message: 'Aadhaar verified successfully!',
-            verifiedAt: new Date().toISOString()
+            message: 'Aadhaar verified successfully!'
         });
         
     } catch (error) {
         console.error('❌ Error verifying Aadhaar OTP:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to verify Aadhaar OTP. Please try again.',
+            message: 'Failed to verify Aadhaar OTP',
             error: error.message 
         });
     }
@@ -473,14 +439,12 @@ app.post('/api/aadhaar/verify', (req, res) => {
 
 // ==================== REGISTRATION ENDPOINTS ====================
 
-// Consumer Registration
 app.post('/api/register/consumer', async (req, res) => {
     try {
         const { username, email, mobile, password, profile_photo_url } = req.body;
         
-        console.log('👤 Consumer registration attempt:', { username, email, mobile });
+        console.log('👤 Consumer registration:', { username, email, mobile });
         
-        // Validation
         if (!username || username.length < 3) {
             return res.status(400).json({ 
                 success: false, 
@@ -509,8 +473,6 @@ app.post('/api/register/consumer', async (req, res) => {
             });
         }
         
-        // Check if user already exists
-        console.log('Checking if user exists...');
         const userExists = await checkUserExists(email, mobile);
         if (userExists) {
             return res.status(400).json({ 
@@ -519,8 +481,6 @@ app.post('/api/register/consumer', async (req, res) => {
             });
         }
         
-        // Save to Supabase
-        console.log('Saving to Supabase...');
         const result = await insertConsumer({
             username,
             email,
@@ -530,7 +490,6 @@ app.post('/api/register/consumer', async (req, res) => {
         });
         
         if (!result.success) {
-            console.error('Insert failed:', result.error);
             return res.status(500).json({ 
                 success: false, 
                 message: 'Failed to create account. Please try again.',
@@ -538,7 +497,7 @@ app.post('/api/register/consumer', async (req, res) => {
             });
         }
         
-        console.log('✅ Registration successful! User ID:', result.data.id);
+        console.log('✅ Consumer registration successful!');
         
         res.json({
             success: true,
@@ -563,7 +522,6 @@ app.post('/api/register/consumer', async (req, res) => {
     }
 });
 
-// Farmer Registration
 app.post('/api/register/farmer', async (req, res) => {
     try {
         const { 
@@ -574,9 +532,8 @@ app.post('/api/register/farmer', async (req, res) => {
             branch_name, aadhaar_verified, mobile_verified
         } = req.body;
         
-        console.log('👨‍🌾 Farmer registration attempt:', { username, email, farm_name });
+        console.log('👨‍🌾 Farmer registration:', { username, email, farm_name });
         
-        // Validation
         if (!username || username.length < 3) {
             return res.status(400).json({ 
                 success: false, 
@@ -619,7 +576,6 @@ app.post('/api/register/farmer', async (req, res) => {
             });
         }
         
-        // Check if user exists
         const userExists = await checkUserExists(email, mobile);
         if (userExists) {
             return res.status(400).json({ 
@@ -628,7 +584,6 @@ app.post('/api/register/farmer', async (req, res) => {
             });
         }
         
-        // Save to Supabase
         const result = await insertFarmer({
             username,
             email,
@@ -662,7 +617,7 @@ app.post('/api/register/farmer', async (req, res) => {
             });
         }
         
-        console.log('✅ Farmer registration successful! ID:', result.data.id);
+        console.log('✅ Farmer registration successful!');
         
         res.json({
             success: true,
@@ -690,7 +645,7 @@ app.post('/api/register/farmer', async (req, res) => {
     }
 });
 
-// ==================== PHOTO UPLOAD ENDPOINT ====================
+// ==================== PHOTO UPLOAD ====================
 app.post('/api/upload-photo', (req, res) => {
     try {
         const { imageData, userType } = req.body;
@@ -704,39 +659,33 @@ app.post('/api/upload-photo', (req, res) => {
             });
         }
         
-        // Generate mock photo URL (in production, upload to S3/Cloudinary)
         const timestamp = Date.now();
         const mockPhotoUrl = `https://api.dicebear.com/7.x/avatars/svg?seed=${userType}_${timestamp}`;
         
         res.json({
             success: true,
             message: 'Profile photo uploaded successfully!',
-            photoUrl: mockPhotoUrl,
-            uploadedAt: new Date().toISOString()
+            photoUrl: mockPhotoUrl
         });
         
     } catch (error) {
         console.error('❌ Error handling photo upload:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to upload photo. Please try again.',
+            message: 'Failed to upload photo',
             error: error.message 
         });
     }
 });
 
-// ==================== DEBUG & TEST ENDPOINTS ====================
-
-// Test Supabase connection
+// ==================== DEBUG ENDPOINTS ====================
 app.get('/api/debug/supabase', async (req, res) => {
     try {
-        // Test query to consumers table
         const { data: consumers, error: consumersError } = await supabase
             .from('consumers')
             .select('id, username, email, created_at')
             .limit(5);
         
-        // Test query to farmers table
         const { data: farmers, error: farmersError } = await supabase
             .from('farmers')
             .select('id, username, email, farm_name, created_at')
@@ -749,16 +698,13 @@ app.get('/api/debug/supabase', async (req, res) => {
         res.json({
             success: errors.length === 0,
             message: errors.length === 0 ? 'Supabase is working!' : 'Supabase has issues',
-            supabase_url: supabaseUrl,
             tables: {
                 consumers: consumersError ? 'Error' : 'Accessible',
                 farmers: farmersError ? 'Error' : 'Accessible'
             },
-            sample_data: {
+            data: {
                 consumers_count: consumers?.length || 0,
-                farmers_count: farmers?.length || 0,
-                consumers_sample: consumers || [],
-                farmers_sample: farmers || []
+                farmers_count: farmers?.length || 0
             },
             errors: errors.length > 0 ? errors : null
         });
@@ -771,39 +717,30 @@ app.get('/api/debug/supabase', async (req, res) => {
     }
 });
 
-// Test insert without validation
-app.post('/api/debug/test-insert', async (req, res) => {
+app.get('/api/debug/table-structure', async (req, res) => {
     try {
-        const testData = {
-            username: 'testuser_' + Date.now(),
-            email: `test${Date.now()}@example.com`,
-            mobile: '9876543' + Math.floor(Math.random() * 1000),
-            password: 'testpassword123'
-        };
-        
-        const result = await insertConsumer(testData);
-        
-        if (!result.success) {
-            return res.json({
-                success: false,
-                message: 'Test insert failed',
-                error: result.error,
-                test_data: testData
-            });
-        }
+        const { data: consumerRow } = await supabase
+            .from('consumers')
+            .select('*')
+            .limit(1);
+            
+        const { data: farmerRow } = await supabase
+            .from('farmers')
+            .select('*')
+            .limit(1);
         
         res.json({
-            success: true,
-            message: 'Test insert successful!',
-            inserted_data: result.data,
-            test_data: testData
+            consumers: {
+                columns: consumerRow?.[0] ? Object.keys(consumerRow[0]) : [],
+                sample: consumerRow?.[0] || null
+            },
+            farmers: {
+                columns: farmerRow?.[0] ? Object.keys(farmerRow[0]) : [],
+                sample: farmerRow?.[0] || null
+            }
         });
     } catch (error) {
-        res.json({
-            success: false,
-            message: 'Test insert error',
-            error: error.message
-        });
+        res.json({ error: error.message });
     }
 });
 
@@ -828,13 +765,24 @@ app.get('/', (req, res) => {
                 consumer: 'POST /api/register/consumer',
                 farmer: 'POST /api/register/farmer'
             },
-            upload: 'POST /api/upload-photo',
-            debug: {
-                supabase: 'GET /api/debug/supabase',
-                test_insert: 'POST /api/debug/test-insert'
-            }
-        },
-        documentation: 'See code comments for details'
+            upload: 'POST /api/upload-photo'
+        }
+    });
+});
+
+// Add helpful GET endpoints
+app.get('/api/register/consumer', (req, res) => {
+    res.status(405).json({
+        success: false,
+        message: 'Method not allowed. Use POST instead of GET.',
+        example: 'curl -X POST "https://unobtrix-project-backend.onrender.com/api/register/consumer" -H "Content-Type: application/json" -d "{\\"username\\":\\"test\\",\\"email\\":\\"test@example.com\\",\\"mobile\\":\\"9876543210\\",\\"password\\":\\"test123\\"}"'
+    });
+});
+
+app.get('/api/register/farmer', (req, res) => {
+    res.status(405).json({
+        success: false,
+        message: 'Method not allowed. Use POST instead of GET.'
     });
 });
 
@@ -844,8 +792,7 @@ app.use((req, res) => {
         success: false,
         message: 'Endpoint not found',
         path: req.path,
-        method: req.method,
-        timestamp: new Date().toISOString()
+        method: req.method
     });
 });
 
@@ -854,8 +801,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({
         success: false,
         message: 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
-        timestamp: new Date().toISOString()
+        error: err.message
     });
 });
 
@@ -874,7 +820,7 @@ setInterval(() => {
     if (cleanedCount > 0) {
         console.log(`🧹 Cleaned up ${cleanedCount} expired OTPs`);
     }
-}, 60 * 60 * 1000); // Every hour
+}, 60 * 60 * 1000);
 
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
@@ -884,22 +830,16 @@ app.listen(PORT, () => {
     🚀 FarmTrials Backend Server
     📍 Port: ${PORT}
     🔗 Supabase: Connected
-    🔗 URL: ${supabaseUrl}
     🌐 Frontend: https://unobtrix.netlify.app
     ⏰ Started: ${new Date().toISOString()}
     
-    📊 Available endpoints:
-       ✅ GET  /health                    - Health check
-       ✅ POST /api/mobile/send-otp       - Send mobile OTP
-       ✅ POST /api/mobile/verify         - Verify mobile OTP
-       ✅ POST /api/aadhaar/send-otp      - Send Aadhaar OTP
-       ✅ POST /api/aadhaar/verify        - Verify Aadhaar OTP
-       ✅ POST /api/register/consumer     - Register consumer (Saves to Supabase)
-       ✅ POST /api/register/farmer       - Register farmer (Saves to Supabase)
-       ✅ POST /api/upload-photo          - Upload profile photo
-       🔧 GET  /api/debug/supabase        - Test Supabase connection
-       🔧 POST /api/debug/test-insert     - Test database insert
-    
-    ✅ Server is ready and connected to Supabase!
+    ✅ Registration endpoints ready!
+    ✅ Using 'password' column (not 'password_hash')
+    ✅ Data will save to your Supabase tables
     `);
+    
+    console.log('\n📋 Test commands:');
+    console.log('   curl -X POST "https://unobtrix-project-backend.onrender.com/api/register/consumer" \\');
+    console.log('     -H "Content-Type: application/json" \\');
+    console.log('     -d "{\\"username\\":\\"test\\",\\"email\\":\\"test@example.com\\",\\"mobile\\":\\"9876543210\\",\\"password\\":\\"test123\\"}"');
 });
