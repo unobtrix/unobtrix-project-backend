@@ -214,6 +214,54 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
     }
 }
 
+// ==================== CHECK TABLE STRUCTURE ====================
+async function checkTableStructure() {
+    try {
+        console.log('🔍 Checking table structure...');
+        
+        // Get one farmer to see columns
+        const { data: farmerData, error: farmerError } = await supabase
+            .from('farmers')
+            .select('*')
+            .limit(1);
+        
+        let farmerColumns = [];
+        if (!farmerError && farmerData && farmerData.length > 0) {
+            farmerColumns = Object.keys(farmerData[0]);
+        }
+        
+        // Get one consumer to see columns
+        const { data: consumerData, error: consumerError } = await supabase
+            .from('consumers')
+            .select('*')
+            .limit(1);
+        
+        let consumerColumns = [];
+        if (!consumerError && consumerData && consumerData.length > 0) {
+            consumerColumns = Object.keys(consumerData[0]);
+        }
+        
+        return {
+            farmers: {
+                columns: farmerColumns,
+                hasUpdatedAt: farmerColumns.includes('updated_at'),
+                hasCreatedAt: farmerColumns.includes('created_at'),
+                hasAccountVerified: farmerColumns.includes('account_verified'),
+                hasProfilePhotoUrl: farmerColumns.includes('profile_photo_url')
+            },
+            consumers: {
+                columns: consumerColumns,
+                hasUpdatedAt: consumerColumns.includes('updated_at'),
+                hasCreatedAt: consumerColumns.includes('created_at')
+            }
+        };
+        
+    } catch (error) {
+        console.error('Error checking table structure:', error);
+        return null;
+    }
+}
+
 // ==================== REGISTRATION WITH IMAGE UPLOAD ====================
 async function insertConsumer(userData) {
     try {
@@ -249,21 +297,42 @@ async function insertConsumer(userData) {
         
         console.log('💾 Inserting consumer into database...');
         
+        // Check table structure first
+        const tableStructure = await checkTableStructure();
+        const selectFields = ['id', 'username', 'email', 'mobile', 'status'];
+        
+        if (profilePhotoUrl && tableStructure?.consumers?.hasProfilePhotoUrl) {
+            selectFields.push('profile_photo_url');
+        }
+        
+        if (tableStructure?.consumers?.hasCreatedAt) {
+            selectFields.push('created_at');
+        }
+        
+        if (tableStructure?.consumers?.hasUpdatedAt) {
+            selectFields.push('updated_at');
+        }
+        
         const consumerData = {
             username: userData.username,
             email: userData.email,
             mobile: userData.mobile,
             password: hashedPassword,
-            profile_photo_url: profilePhotoUrl,
             status: 'active'
         };
         
+        // Only add profile_photo_url if column exists
+        if (profilePhotoUrl && tableStructure?.consumers?.hasProfilePhotoUrl) {
+            consumerData.profile_photo_url = profilePhotoUrl;
+        }
+        
         console.log('📝 Consumer data to insert:', Object.keys(consumerData));
+        console.log('📋 Will select:', selectFields);
         
         const { data, error } = await supabase
             .from('consumers')
             .insert([consumerData])
-            .select('id, username, email, mobile, profile_photo_url, status, created_at, updated_at');
+            .select(selectFields.join(', '));
 
         if (error) {
             console.error('❌ Database insert error:', error);
@@ -274,22 +343,25 @@ async function insertConsumer(userData) {
                 code: error.code
             });
             
-            if (error.code === 'PGRST204' || error.message.includes('schema cache')) {
-                console.error('\n🔧 SCHEMA CACHE ISSUE DETECTED');
-                console.error('Column exists but Supabase cache is outdated.');
-                console.error('\n🛠️ IMMEDIATE FIX:');
-                console.error('1. Go to Supabase Dashboard → Settings → API');
-                console.error('2. Click "Clear Schema Cache"');
-                console.error('3. Wait 2-3 minutes and try again');
+            if (error.code === '42703') {
+                console.error('\n🔧 MISSING COLUMN DETECTED!');
+                console.error('The error indicates a column does not exist.');
+                console.error('Check your table structure and add missing columns.');
             }
             
             throw error;
         }
 
         console.log('✅ Consumer saved successfully! ID:', data[0].id);
-        console.log('📸 Photo URL in database:', data[0].profile_photo_url);
-        console.log('🕒 Created at:', data[0].created_at);
-        console.log('🕒 Updated at:', data[0].updated_at);
+        if (data[0].profile_photo_url) {
+            console.log('📸 Photo URL in database:', data[0].profile_photo_url);
+        }
+        if (data[0].created_at) {
+            console.log('🕒 Created at:', data[0].created_at);
+        }
+        if (data[0].updated_at) {
+            console.log('🕒 Updated at:', data[0].updated_at);
+        }
         return { success: true, data: data[0] };
         
     } catch (error) {
@@ -340,7 +412,26 @@ async function insertFarmer(farmerData) {
 
         console.log('💾 Inserting farmer into database...');
         
-        // WORKAROUND: Try without profile_photo_url first, then with different column names
+        // Check table structure first
+        const tableStructure = await checkTableStructure();
+        console.log('🔍 Table structure:', tableStructure?.farmers);
+        
+        // Build SELECT fields based on what exists
+        const selectFields = ['id', 'username', 'email', 'mobile', 'farm_name', 'status'];
+        
+        if (tableStructure?.farmers?.hasAccountVerified) {
+            selectFields.push('account_verified');
+        }
+        
+        if (tableStructure?.farmers?.hasCreatedAt) {
+            selectFields.push('created_at');
+        }
+        
+        // NO updated_at - your table doesn't have it!
+        // if (tableStructure?.farmers?.hasUpdatedAt) {
+        //     selectFields.push('updated_at');
+        // }
+        
         const farmerInsertData = {
             username: farmerData.username,
             email: farmerData.email,
@@ -363,63 +454,22 @@ async function insertFarmer(farmerData) {
             branch_name: farmerData.branch_name || '',
             aadhaar_verified: farmerData.aadhaar_verified || false,
             mobile_verified: farmerData.mobile_verified || false,
-            account_verified: false,
             status: 'pending_verification'
         };
         
-        // Try different column names for profile photo
-        if (profilePhotoUrl) {
-            console.log('🔍 Trying different column names for profile photo...');
-            
-            // Try common column names
-            const photoColumnNames = ['profile_photo_url', 'profile_picture_url', 'photo_url', 'avatar_url', 'image_url'];
-            
-            for (const columnName of photoColumnNames) {
-                console.log(`   Trying column: ${columnName}`);
-                farmerInsertData[columnName] = profilePhotoUrl;
-                
-                try {
-                    const { data, error } = await supabase
-                        .from('farmers')
-                        .insert([farmerInsertData])
-                        .select('id, username, email, mobile, farm_name, status, created_at, updated_at, account_verified');
-                    
-                    if (!error) {
-                        console.log(`✅ Success with column: ${columnName}`);
-                        // Remove other photo columns to avoid duplicates
-                        photoColumnNames.forEach(name => {
-                            if (name !== columnName && farmerInsertData[name]) {
-                                delete farmerInsertData[name];
-                            }
-                        });
-                        
-                        console.log('✅ Farmer saved successfully! ID:', data[0].id);
-                        console.log('📸 Photo stored in column:', columnName);
-                        console.log('🕒 Created at:', data[0].created_at);
-                        console.log('🕒 Updated at:', data[0].updated_at);
-                        console.log('✅ Account verified:', data[0].account_verified);
-                        return { success: true, data: data[0] };
-                    }
-                    
-                    // Remove this column name if it failed
-                    delete farmerInsertData[columnName];
-                    
-                } catch (columnError) {
-                    console.log(`   ❌ Failed with ${columnName}: ${columnError.message}`);
-                    delete farmerInsertData[columnName];
-                }
-            }
-            
-            console.log('⚠️ Could not find correct photo column, continuing without photo');
+        // Add account_verified only if column exists
+        if (tableStructure?.farmers?.hasAccountVerified) {
+            farmerInsertData.account_verified = false;
+            console.log('✅ Setting account_verified: false');
         }
         
-        console.log('📝 Final farmer data to insert:', Object.keys(farmerInsertData));
+        console.log('📝 Farmer data to insert:', Object.keys(farmerInsertData));
+        console.log('📋 Will select:', selectFields);
         
-        // Final attempt without photo column
         const { data, error } = await supabase
             .from('farmers')
             .insert([farmerInsertData])
-            .select('id, username, email, mobile, farm_name, status, created_at, updated_at, account_verified');
+            .select(selectFields.join(', '));
 
         if (error) {
             console.error('❌ Farmer database insert error:', error);
@@ -430,29 +480,46 @@ async function insertFarmer(farmerData) {
                 code: error.code
             });
             
-            if (error.code === 'PGRST204' || error.message.includes('schema cache')) {
-                console.error('\n🔧 SUPABASE SCHEMA CACHE ISSUE DETECTED!');
+            if (error.code === '42703') {
+                console.error('\n🔧 MISSING COLUMN DETECTED!');
                 console.error('=============================================');
-                console.error('Columns exist but Supabase cache is outdated.');
-                console.error('\n🛠️ IMMEDIATE FIXES:');
-                console.error('1. Go to Supabase Dashboard → Settings → API');
-                console.error('2. Click "Clear Schema Cache"');
-                console.error('3. Wait 2-3 minutes for cache to clear');
-                console.error('4. Restart your Supabase project');
-                console.error('5. Try registration again in a few minutes');
-                console.error('\n📋 WORKAROUND:');
-                console.error('- Check your actual column names in Supabase Table Editor');
-                console.error('- Update the code to match your actual column names');
-                console.error('- Or wait for cache to auto-refresh (2-3 minutes)');
+                console.error('Your farmers table is missing columns.');
+                console.error('\n📋 CURRENT COLUMNS:', tableStructure?.farmers?.columns || []);
+                console.error('\n🛠️ FIX REQUIRED:');
+                console.error('1. Check your farmers table in Supabase');
+                console.error('2. Add missing columns:');
+                console.error('   - account_verified (BOOLEAN DEFAULT false)');
+                console.error('   - created_at (TIMESTAMP DEFAULT now())');
+                console.error('3. Remove "updated_at" from SELECT queries');
+                console.error('\n💡 QUICK FIX: Run this SQL in Supabase SQL Editor:');
+                console.error(`
+                    -- Add account_verified if missing
+                    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
+                    
+                    -- Add created_at if missing  
+                    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
+                    
+                    -- Verify columns exist
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'farmers' AND table_schema = 'public';
+                `);
             }
             
             throw error;
         }
 
         console.log('✅ Farmer saved successfully! ID:', data[0].id);
-        console.log('🕒 Created at:', data[0].created_at);
-        console.log('🕒 Updated at:', data[0].updated_at);
-        console.log('✅ Account verified:', data[0].account_verified);
+        console.log('✅ Farm name:', data[0].farm_name);
+        console.log('✅ Status:', data[0].status);
+        
+        if (data[0].account_verified !== undefined) {
+            console.log('✅ Account verified:', data[0].account_verified);
+        }
+        
+        if (data[0].created_at) {
+            console.log('🕒 Created at:', data[0].created_at);
+        }
+        
         return { success: true, data: data[0] };
         
     } catch (error) {
@@ -465,21 +532,20 @@ async function insertFarmer(farmerData) {
 // ==================== HEALTH CHECK ====================
 app.get('/health', async (req, res) => {
     try {
-        const { data, error } = await supabase
-            .from('farmers')
-            .select('count')
-            .limit(1);
+        const tableStructure = await checkTableStructure();
         
         res.json({ 
             status: 'healthy',
-            server: 'FarmTrials Registration API v6.0',
+            server: 'FarmTrials Registration API v7.0',
             timestamp: new Date().toISOString(),
             supabase: 'Connected',
             storage: 'Supabase Storage ready',
-            note: 'Using workaround for schema cache issues',
+            table_structure: tableStructure,
+            note: 'Adapting to actual table structure',
             features: ['registration', 'image-upload', 'otp-verification'],
             endpoints: {
                 health: 'GET /health',
+                check_structure: 'GET /api/check-structure',
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
                 mobile_otp: 'POST /api/mobile/send-otp',
@@ -494,6 +560,39 @@ app.get('/health', async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Health check failed',
+            error: error.message
+        });
+    }
+});
+
+// ==================== CHECK STRUCTURE ENDPOINT ====================
+app.get('/api/check-structure', async (req, res) => {
+    try {
+        const structure = await checkTableStructure();
+        
+        res.json({
+            success: true,
+            message: 'Table structure check completed',
+            timestamp: new Date().toISOString(),
+            structure: structure,
+            sql_fixes: !structure?.farmers?.hasAccountVerified || !structure?.farmers?.hasCreatedAt ? `
+                -- Run this SQL in Supabase SQL Editor to fix missing columns:
+                
+                -- Add account_verified if missing
+                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
+                
+                -- Add created_at if missing  
+                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
+                
+                -- Add to consumers table if needed
+                ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
+                ALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();
+            ` : 'All required columns exist'
+        });
+    } catch (error) {
+        console.error('Structure check error:', error);
+        res.status(500).json({
+            success: false,
             error: error.message
         });
     }
@@ -957,7 +1056,7 @@ app.post('/api/register/consumer', async (req, res) => {
         
         console.log('✅ Consumer registration completed successfully!');
         
-        res.json({
+        const responseData = {
             success: true,
             message: 'Consumer account created successfully!',
             user: {
@@ -965,16 +1064,25 @@ app.post('/api/register/consumer', async (req, res) => {
                 username,
                 email,
                 mobile,
-                profile_photo_url: result.data.profile_photo_url,
                 user_type: 'consumer',
-                status: result.data.status,
-                created_at: result.data.created_at,
-                updated_at: result.data.updated_at,
-                storage_note: result.data.profile_photo_url ? 
-                    'Profile photo stored in Supabase Storage' : 
-                    'No profile photo provided'
+                status: result.data.status
             }
-        });
+        };
+        
+        if (result.data.profile_photo_url) {
+            responseData.user.profile_photo_url = result.data.profile_photo_url;
+            responseData.user.storage_note = 'Profile photo stored in Supabase Storage';
+        }
+        
+        if (result.data.created_at) {
+            responseData.user.created_at = result.data.created_at;
+        }
+        
+        if (result.data.updated_at) {
+            responseData.user.updated_at = result.data.updated_at;
+        }
+        
+        res.json(responseData);
         
     } catch (error) {
         console.error('❌ Consumer registration error:', error);
@@ -1085,13 +1193,13 @@ app.post('/api/register/farmer', async (req, res) => {
                 success: false, 
                 message: 'Failed to create farmer account. Please try again.',
                 error: result.error,
-                note: 'This is a Supabase schema cache issue. Clear cache and wait 2-3 minutes.'
+                note: 'Check /api/check-structure endpoint to see missing columns'
             });
         }
         
         console.log('✅ Farmer registration completed successfully!');
         
-        res.json({
+        const responseData = {
             success: true,
             message: 'Farmer account created successfully! Your account will be verified within 24-48 hours.',
             farmer: {
@@ -1102,15 +1210,19 @@ app.post('/api/register/farmer', async (req, res) => {
                 aadhaar_number,
                 farm_name,
                 user_type: 'farmer',
-                status: result.data.status,
-                account_verified: result.data.account_verified || false,
-                created_at: result.data.created_at,
-                updated_at: result.data.updated_at,
-                storage_note: result.data.profile_photo_url ? 
-                    'Profile photo stored' : 
-                    'No profile photo stored (schema cache issue)'
+                status: result.data.status
             }
-        });
+        };
+        
+        if (result.data.account_verified !== undefined) {
+            responseData.farmer.account_verified = result.data.account_verified;
+        }
+        
+        if (result.data.created_at) {
+            responseData.farmer.created_at = result.data.created_at;
+        }
+        
+        res.json(responseData);
         
     } catch (error) {
         console.error('❌ Farmer registration error:', error);
@@ -1118,7 +1230,7 @@ app.post('/api/register/farmer', async (req, res) => {
             success: false, 
             message: 'Registration failed. Please try again.',
             error: error.message,
-            note: 'If error mentions "schema cache", clear cache in Supabase Dashboard → Settings → API'
+            note: 'Check table structure and add missing columns'
         });
     }
 });
@@ -1170,12 +1282,12 @@ app.get('/api/debug/users', async (req, res) => {
     try {
         const { data: consumers } = await supabase
             .from('consumers')
-            .select('id, username, email, mobile, status, created_at, updated_at')
+            .select('id, username, email, mobile, status')
             .limit(5);
         
         const { data: farmers } = await supabase
             .from('farmers')
-            .select('id, username, email, mobile, farm_name, status, created_at, updated_at, account_verified')
+            .select('id, username, email, mobile, farm_name, status')
             .limit(5);
         
         res.json({
@@ -1194,120 +1306,59 @@ app.get('/api/debug/users', async (req, res) => {
     }
 });
 
-// ==================== TEST DATABASE CONNECTION ====================
-app.get('/api/test-db', async (req, res) => {
-    try {
-        console.log('🔍 Testing database connection...');
-        
-        const { data, error } = await supabase
-            .from('farmers')
-            .select('id, username, email')
-            .limit(2);
-        
-        if (error) {
-            console.error('Database test error:', error);
-            return res.json({
-                success: false,
-                message: 'Database connection failed',
-                error: error.message,
-                code: error.code
-            });
-        }
-        
-        res.json({
-            success: true,
-            message: 'Database connection successful',
-            farmers_found: data?.length || 0,
-            sample_data: data || []
-        });
-        
-    } catch (error) {
-        console.error('Test DB error:', error);
-        res.json({ error: error.message });
-    }
-});
-
-// ==================== CHECK COLUMN NAMES ====================
-app.get('/api/check-columns', async (req, res) => {
-    try {
-        console.log('🔍 Checking actual column names...');
-        
-        // Try to get a single record to see what columns exist
-        const { data, error } = await supabase
-            .from('farmers')
-            .select('*')
-            .limit(1);
-        
-        if (error) {
-            return res.json({
-                success: false,
-                message: 'Failed to check columns',
-                error: error.message
-            });
-        }
-        
-        if (data && data.length > 0) {
-            const columns = Object.keys(data[0]);
-            return res.json({
-                success: true,
-                message: 'Columns found in farmers table',
-                columns: columns,
-                count: columns.length
-            });
-        }
-        
-        res.json({
-            success: true,
-            message: 'No data in farmers table, but connection works',
-            columns: []
-        });
-        
-    } catch (error) {
-        console.error('Check columns error:', error);
-        res.json({ error: error.message });
-    }
-});
-
 // ==================== ROOT ENDPOINT ====================
-app.get('/', (req, res) => {
-    res.json({ 
-        server: 'FarmTrials Registration API',
-        version: '6.0',
-        status: 'operational',
-        timestamp: new Date().toISOString(),
-        note: 'Using Supabase auto-timestamps - no timestamp issues',
-        issue_note: 'Schema cache issue detected. Clear cache in Supabase Dashboard.',
-        features: {
-            supabase: 'Connected',
-            storage: 'Supabase Storage ready',
-            image_upload: 'Base64 → Storage URL',
-            registration: 'Consumer & Farmer',
-            otp: 'Mobile & Aadhaar verification',
-            security: 'Password hashing with bcrypt',
-            account_verification: 'Farmer account verification (default: false)'
-        },
-        endpoints: {
-            health: 'GET /health',
-            test_db: 'GET /api/test-db',
-            check_columns: 'GET /api/check-columns',
-            check_bucket: 'GET /api/check-bucket',
-            register_consumer: 'POST /api/register/consumer',
-            register_farmer: 'POST /api/register/farmer',
-            test_upload: 'POST /api/test-upload',
-            mobile_otp: {
-                send: 'POST /api/mobile/send-otp',
-                verify: 'POST /api/mobile/verify'
+app.get('/', async (req, res) => {
+    try {
+        const structure = await checkTableStructure();
+        
+        res.json({ 
+            server: 'FarmTrials Registration API',
+            version: '7.0',
+            status: 'operational',
+            timestamp: new Date().toISOString(),
+            note: 'Adapting to actual table structure',
+            table_issues: {
+                farmers_missing_updated_at: !structure?.farmers?.hasUpdatedAt,
+                farmers_missing_account_verified: !structure?.farmers?.hasAccountVerified,
+                farmers_missing_created_at: !structure?.farmers?.hasCreatedAt
             },
-            aadhaar_otp: {
-                send: 'POST /api/aadhaar/send-otp',
-                verify: 'POST /api/aadhaar/verify'
+            features: {
+                supabase: 'Connected',
+                storage: 'Supabase Storage ready',
+                image_upload: 'Base64 → Storage URL',
+                registration: 'Consumer & Farmer',
+                otp: 'Mobile & Aadhaar verification',
+                security: 'Password hashing with bcrypt',
+                account_verification: 'Farmer account verification (if column exists)'
             },
-            debug: {
-                storage: 'GET /api/debug/storage',
-                users: 'GET /api/debug/users'
+            endpoints: {
+                health: 'GET /health',
+                check_structure: 'GET /api/check-structure',
+                check_bucket: 'GET /api/check-bucket',
+                register_consumer: 'POST /api/register/consumer',
+                register_farmer: 'POST /api/register/farmer',
+                test_upload: 'POST /api/test-upload',
+                mobile_otp: {
+                    send: 'POST /api/mobile/send-otp',
+                    verify: 'POST /api/mobile/verify'
+                },
+                aadhaar_otp: {
+                    send: 'POST /api/aadhaar/send-otp',
+                    verify: 'POST /api/aadhaar/verify'
+                },
+                debug: {
+                    storage: 'GET /api/debug/storage',
+                    users: 'GET /api/debug/users'
+                }
             }
-        }
-    });
+        });
+    } catch (error) {
+        res.json({
+            server: 'FarmTrials Registration API',
+            status: 'operational',
+            error: error.message
+        });
+    }
 });
 
 // ==================== ERROR HANDLING ====================
@@ -1353,7 +1404,7 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, async () => {
     console.log(`
-    🚀 FarmTrials Backend Server v6.0
+    🚀 FarmTrials Backend Server v7.0
     📍 Port: ${PORT}
     🔗 Supabase: Connected
     ⏰ Started: ${new Date().toISOString()}
@@ -1376,30 +1427,41 @@ app.listen(PORT, async () => {
         console.log('\n⚠️ Without bucket, photo uploads will fail but registration will still work.');
     }
     
+    console.log('\n🔍 Checking table structure...');
+    const structure = await checkTableStructure();
+    
     console.log(`
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
-    🕒 Timestamps: ✅ Auto-managed by Supabase
-    ✅ Account Verified: Default false for new farmers
+    🕒 Timestamps: ${structure?.farmers?.hasCreatedAt ? '✅ created_at exists' : '❌ created_at missing'}
+    ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
     📸 Images: ${bucketExists ? 'Will be stored in Supabase Storage' : 'Uploads will fail until bucket is created'}
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
-    ⚠️ IMPORTANT SCHEMA CACHE ISSUE DETECTED:
-    Supabase cannot find 'profile_photo_url' column in cache.
+    ⚠️ CRITICAL ISSUE DETECTED:
+    Your farmers table is missing columns!
     
-    🔧 IMMEDIATE FIX REQUIRED:
-    1. Go to Supabase Dashboard → Settings → API
-    2. Click "Clear Schema Cache"
-    3. Wait 2-3 minutes
-    4. Try registration again
+    ${!structure?.farmers?.hasAccountVerified ? '❌ account_verified column missing\n' : ''}
+    ${!structure?.farmers?.hasCreatedAt ? '❌ created_at column missing\n' : ''}
+    ${structure?.farmers?.hasUpdatedAt ? '✅ updated_at column exists' : '✅ updated_at column not required'}
     
-    ✅ Server is running with workaround!
+    🔧 REQUIRED FIX:
+    1. Go to Supabase Dashboard → SQL Editor
+    2. Run this SQL:
+    
+    -- Add missing columns to farmers table
+    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
+    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
+    
+    3. Check structure: GET /api/check-structure
+    
+    ✅ Server is running with adaptive structure!
     
     📋 Test endpoints:
        GET  /health                    - Health check
-       GET  /api/test-db               - Test database connection
-       GET  /api/check-columns         - Check actual column names
+       GET  /api/check-structure       - Check table structure
        GET  /api/check-bucket          - Check bucket status
+       POST /api/register/farmer       - Register farmer
        GET  /api/debug/users           - Check existing users
     `);
 });
