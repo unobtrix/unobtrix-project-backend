@@ -220,6 +220,56 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
     }
 }
 
+// ==================== CHECK TABLE SCHEMA ====================
+async function checkTableSchema() {
+    try {
+        console.log('🔍 Checking table schemas...');
+        
+        // Check farmers table columns
+        const { data: farmerData, error: farmerError } = await supabase
+            .from('farmers')
+            .select('*')
+            .limit(1);
+        
+        if (farmerError) {
+            console.error('❌ Error checking farmers table:', farmerError.message);
+            return {
+                farmers: { error: farmerError.message },
+                consumers: {}
+            };
+        }
+        
+        const farmerColumns = farmerData && farmerData[0] ? Object.keys(farmerData[0]) : [];
+        
+        // Check consumers table columns
+        const { data: consumerData, error: consumerError } = await supabase
+            .from('consumers')
+            .select('*')
+            .limit(1);
+        
+        const consumerColumns = consumerData && consumerData[0] ? Object.keys(consumerData[0]) : [];
+        
+        console.log('✅ Farmers table columns:', farmerColumns);
+        console.log('✅ Consumers table columns:', consumerColumns);
+        
+        return {
+            farmers: {
+                columns: farmerColumns,
+                hasPassword: farmerColumns.includes('password'),
+                hasAccountVerified: farmerColumns.includes('account_verified')
+            },
+            consumers: {
+                columns: consumerColumns,
+                hasPassword: consumerColumns.includes('password')
+            }
+        };
+        
+    } catch (error) {
+        console.error('❌ Error checking table schema:', error);
+        return { error: error.message };
+    }
+}
+
 // ==================== REGISTRATION WITH IMAGE UPLOAD ====================
 async function insertConsumer(userData) {
     try {
@@ -245,8 +295,6 @@ async function insertConsumer(userData) {
             
             if (!profilePhotoUrl) {
                 console.log('⚠️ Photo upload failed, continuing without photo');
-                // You can set a default avatar URL here if you upload one to your bucket
-                // profilePhotoUrl = 'https://ribehublefecccabzwkv.supabase.co/storage/v1/object/public/profile-photos/default_avatar.png';
             } else {
                 console.log('✅ Photo uploaded to:', profilePhotoUrl);
             }
@@ -259,6 +307,16 @@ async function insertConsumer(userData) {
         }
         
         console.log('💾 Inserting consumer into database...');
+        
+        // Check if password column exists in consumers table
+        const schema = await checkTableSchema();
+        if (!schema.consumers.hasPassword) {
+            console.error('❌ Consumers table does not have a password column!');
+            return { 
+                success: false, 
+                error: 'Database schema error: password column missing in consumers table' 
+            };
+        }
         
         // Prepare data for insertion - NO timestamps included, let Supabase handle them
         const consumerData = {
@@ -275,7 +333,7 @@ async function insertConsumer(userData) {
         const { data, error } = await supabase
             .from('consumers')
             .insert([consumerData])
-            .select('id, username, email, mobile, profile_photo_url, created_at, updated_at');
+            .select('id, username, email, mobile, profile_photo_url, status, created_at, updated_at');
 
         if (error) {
             console.error('❌ Database insert error:', error);
@@ -345,7 +403,25 @@ async function insertFarmer(farmerData) {
 
         console.log('💾 Inserting farmer into database...');
         
-        // Prepare data for insertion - NO timestamps included, let Supabase handle them
+        // Check if required columns exist in farmers table
+        const schema = await checkTableSchema();
+        if (!schema.farmers.hasPassword) {
+            console.error('❌ Farmers table does not have a password column!');
+            console.error('📋 Please add the password column to your farmers table:');
+            console.error(`
+                ALTER TABLE farmers ADD COLUMN password TEXT;
+                
+                Or if you want to rename your existing column:
+                ALTER TABLE farmers RENAME COLUMN hashed_password TO password;
+            `);
+            return { 
+                success: false, 
+                error: 'Database schema error: password column missing in farmers table',
+                instructions: 'Add password column to farmers table or rename existing password column'
+            };
+        }
+        
+        // Prepare data for insertion based on available columns
         const farmerInsertData = {
             username: farmerData.username,
             email: farmerData.email,
@@ -369,16 +445,20 @@ async function insertFarmer(farmerData) {
             branch_name: farmerData.branch_name || '',
             aadhaar_verified: farmerData.aadhaar_verified || false,
             mobile_verified: farmerData.mobile_verified || false,
-            account_verified: false, // Set to false as default
             status: 'pending_verification'
         };
+        
+        // Add account_verified only if column exists
+        if (schema.farmers.hasAccountVerified) {
+            farmerInsertData.account_verified = false;
+        }
         
         console.log('📝 Farmer data to insert:', Object.keys(farmerInsertData));
         
         const { data, error } = await supabase
             .from('farmers')
             .insert([farmerInsertData])
-            .select('id, username, email, mobile, farm_name, profile_photo_url, created_at, updated_at, account_verified');
+            .select('id, username, email, mobile, farm_name, profile_photo_url, status, created_at, updated_at');
 
         if (error) {
             console.error('❌ Farmer database insert error:', error);
@@ -388,6 +468,18 @@ async function insertFarmer(farmerData) {
                 hint: error.hint,
                 code: error.code
             });
+            
+            // Check for specific column errors
+            if (error.message && error.message.includes('password')) {
+                console.error('\n🔧 DATABASE FIX REQUIRED:');
+                console.error('1. Go to Supabase Dashboard → SQL Editor');
+                console.error('2. Run this SQL to add password column:');
+                console.error(`
+                    ALTER TABLE farmers ADD COLUMN password TEXT;
+                `);
+                console.error('3. Or if you have a different password column name, update your schema accordingly.');
+            }
+            
             throw error;
         }
 
@@ -395,7 +487,7 @@ async function insertFarmer(farmerData) {
         console.log('📸 Photo URL in database:', data[0].profile_photo_url);
         console.log('🕒 Created at:', data[0].created_at);
         console.log('🕒 Updated at:', data[0].updated_at);
-        console.log('✅ Account verified:', data[0].account_verified);
+        console.log('✅ Account status:', data[0].status);
         return { success: true, data: data[0] };
         
     } catch (error) {
@@ -406,26 +498,46 @@ async function insertFarmer(farmerData) {
 }
 
 // ==================== HEALTH CHECK ====================
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'healthy',
-        server: 'FarmTrials Registration API v6.0',
-        timestamp: new Date().toISOString(),
-        supabase: 'Connected',
-        storage: 'Supabase Storage ready',
-        features: ['registration', 'image-upload', 'otp-verification'],
-        endpoints: {
-            health: 'GET /health',
-            register_consumer: 'POST /api/register/consumer',
-            register_farmer: 'POST /api/register/farmer',
-            mobile_otp: 'POST /api/mobile/send-otp',
-            verify_mobile: 'POST /api/mobile/verify',
-            aadhaar_otp: 'POST /api/aadhaar/send-otp',
-            verify_aadhaar: 'POST /api/aadhaar/verify',
-            upload_photo: 'POST /api/upload-photo',
-            check_bucket: 'GET /api/check-bucket'
-        }
-    });
+app.get('/health', async (req, res) => {
+    try {
+        const schema = await checkTableSchema();
+        
+        res.json({ 
+            status: 'healthy',
+            server: 'FarmTrials Registration API v6.0',
+            timestamp: new Date().toISOString(),
+            supabase: 'Connected',
+            storage: 'Supabase Storage ready',
+            schema_check: {
+                farmers: {
+                    has_password_column: schema.farmers?.hasPassword || false,
+                    has_account_verified: schema.farmers?.hasAccountVerified || false
+                },
+                consumers: {
+                    has_password_column: schema.consumers?.hasPassword || false
+                }
+            },
+            features: ['registration', 'image-upload', 'otp-verification'],
+            endpoints: {
+                health: 'GET /health',
+                register_consumer: 'POST /api/register/consumer',
+                register_farmer: 'POST /api/register/farmer',
+                mobile_otp: 'POST /api/mobile/send-otp',
+                verify_mobile: 'POST /api/mobile/verify',
+                aadhaar_otp: 'POST /api/aadhaar/send-otp',
+                verify_aadhaar: 'POST /api/aadhaar/verify',
+                upload_photo: 'POST /api/upload-photo',
+                check_bucket: 'GET /api/check-bucket',
+                check_schema: 'GET /api/check-schema'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            message: 'Health check failed',
+            error: error.message
+        });
+    }
 });
 
 // ==================== MOBILE OTP ENDPOINTS ====================
@@ -744,6 +856,27 @@ app.get('/api/check-bucket', async (req, res) => {
     }
 });
 
+// ==================== CHECK SCHEMA ENDPOINT ====================
+app.get('/api/check-schema', async (req, res) => {
+    try {
+        const schema = await checkTableSchema();
+        
+        res.json({
+            success: true,
+            message: 'Table schema check completed',
+            timestamp: new Date().toISOString(),
+            schema: schema
+        });
+        
+    } catch (error) {
+        console.error('❌ Schema check error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // ==================== TEST UPLOAD ENDPOINT ====================
 app.post('/api/test-upload', async (req, res) => {
     try {
@@ -911,6 +1044,7 @@ app.post('/api/register/consumer', async (req, res) => {
                 mobile,
                 profile_photo_url: result.data.profile_photo_url,
                 user_type: 'consumer',
+                status: result.data.status,
                 created_at: result.data.created_at, // This will be auto-populated by Supabase
                 updated_at: result.data.updated_at, // This will be auto-populated by Supabase
                 storage_note: result.data.profile_photo_url ? 
@@ -1031,7 +1165,10 @@ app.post('/api/register/farmer', async (req, res) => {
             return res.status(500).json({ 
                 success: false, 
                 message: 'Failed to create farmer account. Please try again.',
-                error: result.error 
+                error: result.error,
+                schema_error: result.error.includes('password column') 
+                    ? 'Please add password column to farmers table in Supabase' 
+                    : null
             });
         }
         
@@ -1049,8 +1186,7 @@ app.post('/api/register/farmer', async (req, res) => {
                 farm_name,
                 profile_photo_url: result.data.profile_photo_url,
                 user_type: 'farmer',
-                status: 'pending_verification',
-                account_verified: result.data.account_verified, // false by default
+                status: result.data.status,
                 created_at: result.data.created_at, // This will be auto-populated by Supabase
                 updated_at: result.data.updated_at, // This will be auto-populated by Supabase
                 storage_note: result.data.profile_photo_url ? 
@@ -1116,12 +1252,12 @@ app.get('/api/debug/users', async (req, res) => {
     try {
         const { data: consumers } = await supabase
             .from('consumers')
-            .select('id, username, email, mobile, profile_photo_url, created_at, updated_at')
+            .select('id, username, email, mobile, profile_photo_url, status, created_at, updated_at')
             .limit(5);
         
         const { data: farmers } = await supabase
             .from('farmers')
-            .select('id, username, email, mobile, farm_name, profile_photo_url, created_at, updated_at, account_verified')
+            .select('id, username, email, mobile, farm_name, profile_photo_url, status, created_at, updated_at')
             .limit(5);
         
         res.json({
@@ -1145,34 +1281,64 @@ app.get('/api/debug/schema', async (req, res) => {
     try {
         console.log('🔍 Checking database schema...');
         
-        // Get table structure info
-        const { data: consumers, error: consumersError } = await supabase
-            .from('consumers')
-            .select('*')
-            .limit(1);
-            
-        const { data: farmers, error: farmersError } = await supabase
-            .from('farmers')
-            .select('*')
-            .limit(1);
+        const schema = await checkTableSchema();
         
         res.json({
             success: true,
             note: 'Using Supabase auto-timestamps - removed created_at/updated_at from insert queries',
             timestamp_handling: 'Auto-managed by Supabase database',
-            consumer_fields_sample: consumers && consumers[0] ? Object.keys(consumers[0]) : [],
-            farmer_fields_sample: farmers && farmers[0] ? Object.keys(farmers[0]) : [],
-            important_notes: [
-                '1. account_verified column should be BOOLEAN with DEFAULT false',
-                '2. created_at column should be TIMESTAMP with timezone with DEFAULT now()',
-                '3. updated_at column should be TIMESTAMP with timezone with DEFAULT now()',
-                '4. Supabase will automatically fill timestamps when we do NOT include them in INSERT'
-            ]
+            schema_check: schema,
+            sql_fixes_needed: !schema.farmers.hasPassword ? [
+                '1. Go to Supabase Dashboard → SQL Editor',
+                '2. Run this SQL to add password column:',
+                '   ALTER TABLE farmers ADD COLUMN password TEXT;',
+                '3. Or if you have a different column name for password, update your code accordingly.'
+            ] : []
         });
         
     } catch (error) {
         console.error('Schema debug error:', error);
         res.json({ error: error.message });
+    }
+});
+
+// ==================== FIX DATABASE SCHEMA ====================
+app.post('/api/fix-schema', async (req, res) => {
+    try {
+        const { fix_type } = req.body;
+        
+        console.log('🔧 Attempting to fix schema for:', fix_type);
+        
+        // Note: This endpoint requires SQL execution permissions
+        // In production, you might want to run these SQL commands manually in Supabase Dashboard
+        
+        res.json({
+            success: true,
+            message: 'Schema fix instructions',
+            instructions: {
+                password_column: [
+                    '1. Go to Supabase Dashboard → SQL Editor',
+                    '2. Run this SQL for farmers table:',
+                    '   ALTER TABLE farmers ADD COLUMN password TEXT;',
+                    '3. Run this SQL for consumers table (if needed):',
+                    '   ALTER TABLE consumers ADD COLUMN password TEXT;'
+                ],
+                timestamps: [
+                    '1. Ensure both tables have:',
+                    '   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()',
+                    '   updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()',
+                    '2. These should already exist if created via Supabase UI'
+                ]
+            },
+            note: 'Run these SQL commands manually in Supabase Dashboard for security reasons'
+        });
+        
+    } catch (error) {
+        console.error('Schema fix error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
 });
 
@@ -1190,16 +1356,22 @@ app.post('/api/verify/farmer-account', async (req, res) => {
             });
         }
         
-        // Update the farmer's account_verified status
+        // Check if account_verified column exists
+        const schema = await checkTableSchema();
+        const updateData = {
+            status: verified === true ? 'active' : 'pending_verification'
+        };
+        
+        if (schema.farmers.hasAccountVerified) {
+            updateData.account_verified = verified === true;
+        }
+        
+        // Update the farmer's status
         const { data, error } = await supabase
             .from('farmers')
-            .update({ 
-                account_verified: verified === true,
-                status: verified === true ? 'active' : 'pending_verification',
-                updated_at: new Date().toISOString() // Force update timestamp
-            })
+            .update(updateData)
             .eq('id', farmer_id)
-            .select('id, username, email, account_verified, status, created_at, updated_at');
+            .select('id, username, email, status, created_at, updated_at');
         
         if (error) {
             console.error('❌ Account verification error:', error);
@@ -1221,7 +1393,7 @@ app.post('/api/verify/farmer-account', async (req, res) => {
         
         res.json({
             success: true,
-            message: `Account verification ${verified ? 'approved' : 'rejected'} successfully`,
+            message: `Account ${verified ? 'approved' : 'rejected'} successfully`,
             farmer: data[0]
         });
         
@@ -1236,44 +1408,59 @@ app.post('/api/verify/farmer-account', async (req, res) => {
 });
 
 // ==================== ROOT ENDPOINT ====================
-app.get('/', (req, res) => {
-    res.json({ 
-        server: 'FarmTrials Registration API',
-        version: '6.0',
-        status: 'operational',
-        timestamp: new Date().toISOString(),
-        note: 'Using Supabase auto-timestamps - no timestamp issues',
-        features: {
-            supabase: 'Connected',
-            storage: 'Supabase Storage (manual bucket setup required)',
-            image_upload: 'Base64 → Storage URL',
-            registration: 'Consumer & Farmer',
-            otp: 'Mobile & Aadhaar verification',
-            security: 'Password hashing with bcrypt',
-            account_verification: 'Farmer account verification system'
-        },
-        endpoints: {
-            health: 'GET /health',
-            check_bucket: 'GET /api/check-bucket',
-            register_consumer: 'POST /api/register/consumer',
-            register_farmer: 'POST /api/register/farmer',
-            verify_farmer_account: 'POST /api/verify/farmer-account',
-            test_upload: 'POST /api/test-upload',
-            mobile_otp: {
-                send: 'POST /api/mobile/send-otp',
-                verify: 'POST /api/mobile/verify'
+app.get('/', async (req, res) => {
+    try {
+        const schema = await checkTableSchema();
+        
+        res.json({ 
+            server: 'FarmTrials Registration API',
+            version: '6.0',
+            status: 'operational',
+            timestamp: new Date().toISOString(),
+            note: 'Using Supabase auto-timestamps - no timestamp issues',
+            schema_status: {
+                farmers_password: schema.farmers?.hasPassword ? '✅ OK' : '❌ MISSING',
+                consumers_password: schema.consumers?.hasPassword ? '✅ OK' : '❌ MISSING'
             },
-            aadhaar_otp: {
-                send: 'POST /api/aadhaar/send-otp',
-                verify: 'POST /api/aadhaar/verify'
+            features: {
+                supabase: 'Connected',
+                storage: 'Supabase Storage ready',
+                image_upload: 'Base64 → Storage URL',
+                registration: 'Consumer & Farmer',
+                otp: 'Mobile & Aadhaar verification',
+                security: 'Password hashing with bcrypt',
+                account_verification: 'Farmer account verification system'
             },
-            debug: {
-                storage: 'GET /api/debug/storage',
-                users: 'GET /api/debug/users',
-                schema: 'GET /api/debug/schema'
+            endpoints: {
+                health: 'GET /health',
+                check_bucket: 'GET /api/check-bucket',
+                check_schema: 'GET /api/check-schema',
+                register_consumer: 'POST /api/register/consumer',
+                register_farmer: 'POST /api/register/farmer',
+                verify_farmer_account: 'POST /api/verify/farmer-account',
+                test_upload: 'POST /api/test-upload',
+                mobile_otp: {
+                    send: 'POST /api/mobile/send-otp',
+                    verify: 'POST /api/mobile/verify'
+                },
+                aadhaar_otp: {
+                    send: 'POST /api/aadhaar/send-otp',
+                    verify: 'POST /api/aadhaar/verify'
+                },
+                debug: {
+                    storage: 'GET /api/debug/storage',
+                    users: 'GET /api/debug/users',
+                    schema: 'GET /api/debug/schema'
+                }
             }
-        }
-    });
+        });
+    } catch (error) {
+        res.json({
+            server: 'FarmTrials Registration API',
+            status: 'operational',
+            error: error.message
+        });
+    }
 });
 
 // ==================== ERROR HANDLING ====================
@@ -1343,24 +1530,41 @@ app.listen(PORT, async () => {
         console.log('\n⚠️ Without bucket, photo uploads will fail but registration will still work.');
     }
     
+    // Check table schema on startup
+    console.log('🔍 Checking table schemas...');
+    const schema = await checkTableSchema();
+    
     console.log(`
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
     🕒 Timestamps: ✅ Auto-managed by Supabase
-    ✅ Account Verification: Default false, can be updated via API
+    🔐 Password Columns:
+        Farmers: ${schema.farmers?.hasPassword ? '✅ OK' : '❌ MISSING'}
+        Consumers: ${schema.consumers?.hasPassword ? '✅ OK' : '❌ MISSING'}
     📸 Images: ${bucketExists ? 'Will be stored in Supabase Storage' : 'Uploads will fail until bucket is created'}
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
     ✅ Server is running!
     
-    📋 Test endpoints:
+    📋 Important Endpoints:
        GET  /health                    - Health check
+       GET  /api/check-schema          - Check table schema
        GET  /api/check-bucket          - Check bucket status
-       GET  /api/debug/schema          - Check database schema
-       POST /api/register/consumer     - Register consumer
        POST /api/register/farmer       - Register farmer
-       POST /api/verify/farmer-account - Verify farmer account
-       POST /api/test-upload           - Test image upload
-       GET  /api/debug/storage         - Check storage contents
+       GET  /api/debug/schema          - Debug schema issues
+    
+    ${!schema.farmers?.hasPassword ? `
+    ⚠️ DATABASE FIX REQUIRED:
+    The farmers table is missing the password column.
+    
+    To fix this, run in Supabase SQL Editor:
+    -----------------------------------------
+    ALTER TABLE farmers ADD COLUMN password TEXT;
+    -----------------------------------------
+    
+    Or if you have a different password column name:
+    1. Check your current column name in farmers table
+    2. Update the insertFarmer function to use that column name
+    ` : ''}
     `);
 });
