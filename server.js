@@ -259,18 +259,23 @@ async function insertConsumer(userData) {
         }
         
         console.log('💾 Inserting consumer into database...');
+        
+        // Prepare data for insertion - NO timestamps included, let Supabase handle them
+        const consumerData = {
+            username: userData.username,
+            email: userData.email,
+            mobile: userData.mobile,
+            password: hashedPassword,
+            profile_photo_url: profilePhotoUrl,
+            status: 'active'
+        };
+        
+        console.log('📝 Consumer data to insert:', Object.keys(consumerData));
+        
         const { data, error } = await supabase
             .from('consumers')
-            .insert([{
-                username: userData.username,
-                email: userData.email,
-                mobile: userData.mobile,
-                password: hashedPassword,
-                profile_photo_url: profilePhotoUrl,
-                status: 'active'
-                // Removed: created_at, updated_at - Let Supabase handle timestamps
-            }])
-            .select('id, username, email, mobile, profile_photo_url, created_at');
+            .insert([consumerData])
+            .select('id, username, email, mobile, profile_photo_url, created_at, updated_at');
 
         if (error) {
             console.error('❌ Database insert error:', error);
@@ -286,6 +291,7 @@ async function insertConsumer(userData) {
         console.log('✅ Consumer saved successfully! ID:', data[0].id);
         console.log('📸 Photo URL in database:', data[0].profile_photo_url);
         console.log('🕒 Created at:', data[0].created_at);
+        console.log('🕒 Updated at:', data[0].updated_at);
         return { success: true, data: data[0] };
         
     } catch (error) {
@@ -338,36 +344,41 @@ async function insertFarmer(farmerData) {
         }
 
         console.log('💾 Inserting farmer into database...');
+        
+        // Prepare data for insertion - NO timestamps included, let Supabase handle them
+        const farmerInsertData = {
+            username: farmerData.username,
+            email: farmerData.email,
+            aadhaar_number: farmerData.aadhaar_number,
+            mobile: farmerData.mobile,
+            password: hashedPassword,
+            profile_photo_url: profilePhotoUrl,
+            farm_name: farmerData.farm_name,
+            farm_size: parseFloat(farmerData.farm_size) || 0,
+            specialization: farmerData.specialization || 'Not specified',
+            certifications: certificationsArray,
+            village: farmerData.village || '',
+            taluka: farmerData.taluka || '',
+            district: farmerData.district || '',
+            state: farmerData.state || '',
+            pin_code: farmerData.pin_code || '',
+            account_holder_name: farmerData.account_holder_name || '',
+            account_number: farmerData.account_number || '',
+            bank_name: farmerData.bank_name || '',
+            ifsc_code: farmerData.ifsc_code || '',
+            branch_name: farmerData.branch_name || '',
+            aadhaar_verified: farmerData.aadhaar_verified || false,
+            mobile_verified: farmerData.mobile_verified || false,
+            account_verified: false, // Set to false as default
+            status: 'pending_verification'
+        };
+        
+        console.log('📝 Farmer data to insert:', Object.keys(farmerInsertData));
+        
         const { data, error } = await supabase
             .from('farmers')
-            .insert([{
-                username: farmerData.username,
-                email: farmerData.email,
-                aadhaar_number: farmerData.aadhaar_number,
-                mobile: farmerData.mobile,
-                password: hashedPassword,
-                profile_photo_url: profilePhotoUrl,
-                farm_name: farmerData.farm_name,
-                farm_size: parseFloat(farmerData.farm_size) || 0,
-                specialization: farmerData.specialization || 'Not specified',
-                certifications: certificationsArray,
-                village: farmerData.village || '',
-                taluka: farmerData.taluka || '',
-                district: farmerData.district || '',
-                state: farmerData.state || '',
-                pin_code: farmerData.pin_code || '',
-                account_holder_name: farmerData.account_holder_name || '',
-                account_number: farmerData.account_number || '',
-                bank_name: farmerData.bank_name || '',
-                ifsc_code: farmerData.ifsc_code || '',
-                branch_name: farmerData.branch_name || '',
-                aadhaar_verified: farmerData.aadhaar_verified || false,
-                mobile_verified: farmerData.mobile_verified || false,
-                account_verified: 'pending',
-                status: 'pending_verification'
-                // Removed: created_at, updated_at - Let Supabase handle timestamps
-            }])
-            .select('id, username, email, mobile, farm_name, profile_photo_url, created_at');
+            .insert([farmerInsertData])
+            .select('id, username, email, mobile, farm_name, profile_photo_url, created_at, updated_at, account_verified');
 
         if (error) {
             console.error('❌ Farmer database insert error:', error);
@@ -383,6 +394,8 @@ async function insertFarmer(farmerData) {
         console.log('✅ Farmer saved successfully! ID:', data[0].id);
         console.log('📸 Photo URL in database:', data[0].profile_photo_url);
         console.log('🕒 Created at:', data[0].created_at);
+        console.log('🕒 Updated at:', data[0].updated_at);
+        console.log('✅ Account verified:', data[0].account_verified);
         return { success: true, data: data[0] };
         
     } catch (error) {
@@ -899,6 +912,7 @@ app.post('/api/register/consumer', async (req, res) => {
                 profile_photo_url: result.data.profile_photo_url,
                 user_type: 'consumer',
                 created_at: result.data.created_at, // This will be auto-populated by Supabase
+                updated_at: result.data.updated_at, // This will be auto-populated by Supabase
                 storage_note: result.data.profile_photo_url ? 
                     'Profile photo stored in Supabase Storage' : 
                     'No profile photo provided'
@@ -1036,7 +1050,9 @@ app.post('/api/register/farmer', async (req, res) => {
                 profile_photo_url: result.data.profile_photo_url,
                 user_type: 'farmer',
                 status: 'pending_verification',
+                account_verified: result.data.account_verified, // false by default
                 created_at: result.data.created_at, // This will be auto-populated by Supabase
+                updated_at: result.data.updated_at, // This will be auto-populated by Supabase
                 storage_note: result.data.profile_photo_url ? 
                     'Profile photo stored in Supabase Storage' : 
                     'No profile photo provided'
@@ -1100,12 +1116,12 @@ app.get('/api/debug/users', async (req, res) => {
     try {
         const { data: consumers } = await supabase
             .from('consumers')
-            .select('id, username, email, mobile, profile_photo_url, created_at')
+            .select('id, username, email, mobile, profile_photo_url, created_at, updated_at')
             .limit(5);
         
         const { data: farmers } = await supabase
             .from('farmers')
-            .select('id, username, email, mobile, farm_name, profile_photo_url, created_at')
+            .select('id, username, email, mobile, farm_name, profile_photo_url, created_at, updated_at, account_verified')
             .limit(5);
         
         res.json({
@@ -1143,14 +1159,79 @@ app.get('/api/debug/schema', async (req, res) => {
         res.json({
             success: true,
             note: 'Using Supabase auto-timestamps - removed created_at/updated_at from insert queries',
-            consumers_sample_keys: consumers && consumers[0] ? Object.keys(consumers[0]) : [],
-            farmers_sample_keys: farmers && farmers[0] ? Object.keys(farmers[0]) : [],
-            timestamp_handling: 'Auto-managed by Supabase database'
+            timestamp_handling: 'Auto-managed by Supabase database',
+            consumer_fields_sample: consumers && consumers[0] ? Object.keys(consumers[0]) : [],
+            farmer_fields_sample: farmers && farmers[0] ? Object.keys(farmers[0]) : [],
+            important_notes: [
+                '1. account_verified column should be BOOLEAN with DEFAULT false',
+                '2. created_at column should be TIMESTAMP with timezone with DEFAULT now()',
+                '3. updated_at column should be TIMESTAMP with timezone with DEFAULT now()',
+                '4. Supabase will automatically fill timestamps when we do NOT include them in INSERT'
+            ]
         });
         
     } catch (error) {
         console.error('Schema debug error:', error);
         res.json({ error: error.message });
+    }
+});
+
+// ==================== ACCOUNT VERIFICATION ENDPOINTS ====================
+app.post('/api/verify/farmer-account', async (req, res) => {
+    try {
+        const { farmer_id, verified } = req.body;
+        
+        console.log('🔍 Farmer account verification request:', { farmer_id, verified });
+        
+        if (!farmer_id) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Farmer ID is required' 
+            });
+        }
+        
+        // Update the farmer's account_verified status
+        const { data, error } = await supabase
+            .from('farmers')
+            .update({ 
+                account_verified: verified === true,
+                status: verified === true ? 'active' : 'pending_verification',
+                updated_at: new Date().toISOString() // Force update timestamp
+            })
+            .eq('id', farmer_id)
+            .select('id, username, email, account_verified, status, created_at, updated_at');
+        
+        if (error) {
+            console.error('❌ Account verification error:', error);
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Failed to update verification status',
+                error: error.message 
+            });
+        }
+        
+        if (!data || data.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Farmer not found' 
+            });
+        }
+        
+        console.log('✅ Account verification updated:', data[0]);
+        
+        res.json({
+            success: true,
+            message: `Account verification ${verified ? 'approved' : 'rejected'} successfully`,
+            farmer: data[0]
+        });
+        
+    } catch (error) {
+        console.error('❌ Account verification endpoint error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to process verification',
+            error: error.message 
+        });
     }
 });
 
@@ -1168,13 +1249,15 @@ app.get('/', (req, res) => {
             image_upload: 'Base64 → Storage URL',
             registration: 'Consumer & Farmer',
             otp: 'Mobile & Aadhaar verification',
-            security: 'Password hashing with bcrypt'
+            security: 'Password hashing with bcrypt',
+            account_verification: 'Farmer account verification system'
         },
         endpoints: {
             health: 'GET /health',
             check_bucket: 'GET /api/check-bucket',
             register_consumer: 'POST /api/register/consumer',
             register_farmer: 'POST /api/register/farmer',
+            verify_farmer_account: 'POST /api/verify/farmer-account',
             test_upload: 'POST /api/test-upload',
             mobile_otp: {
                 send: 'POST /api/mobile/send-otp',
@@ -1263,6 +1346,7 @@ app.listen(PORT, async () => {
     console.log(`
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
     🕒 Timestamps: ✅ Auto-managed by Supabase
+    ✅ Account Verification: Default false, can be updated via API
     📸 Images: ${bucketExists ? 'Will be stored in Supabase Storage' : 'Uploads will fail until bucket is created'}
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
@@ -1275,6 +1359,7 @@ app.listen(PORT, async () => {
        GET  /api/debug/schema          - Check database schema
        POST /api/register/consumer     - Register consumer
        POST /api/register/farmer       - Register farmer
+       POST /api/verify/farmer-account - Verify farmer account
        POST /api/test-upload           - Test image upload
        GET  /api/debug/storage         - Check storage contents
     `);
