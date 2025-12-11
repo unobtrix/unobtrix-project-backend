@@ -247,12 +247,13 @@ async function checkTableStructure() {
                 hasUpdatedAt: farmerColumns.includes('updated_at'),
                 hasCreatedAt: farmerColumns.includes('created_at'),
                 hasAccountVerified: farmerColumns.includes('account_verified'),
-                hasProfilePhotoUrl: farmerColumns.includes('profile_photo_url')
+                hasProfilePhotoUrl: farmerColumns.includes('profile_photo_url') // Check this
             },
             consumers: {
                 columns: consumerColumns,
                 hasUpdatedAt: consumerColumns.includes('updated_at'),
-                hasCreatedAt: consumerColumns.includes('created_at')
+                hasCreatedAt: consumerColumns.includes('created_at'),
+                hasProfilePhotoUrl: consumerColumns.includes('profile_photo_url') // Add this if missing
             }
         };
         
@@ -269,6 +270,7 @@ async function insertConsumer(userData) {
         
         const hashedPassword = await hashPassword(userData.password);
         
+        // Initialize with empty string to satisfy NOT NULL constraint
         let profilePhotoUrl = '';
         
         const photoData = userData.profile_photo_base64 || userData.profile_photo_url;
@@ -288,12 +290,14 @@ async function insertConsumer(userData) {
                 console.log('✅ Photo uploaded to:', profilePhotoUrl);
             } else {
                 console.log('⚠️ Photo upload failed, using empty string');
+                // profilePhotoUrl remains empty string
             }
         } else if (photoData && photoData.includes('http')) {
             profilePhotoUrl = photoData;
             console.log('✅ Using existing photo URL:', profilePhotoUrl);
         } else {
             console.log('⚠️ No valid photo data provided, using empty string');
+            // profilePhotoUrl remains empty string
         }
         
         console.log('💾 Inserting consumer into database...');
@@ -302,6 +306,7 @@ async function insertConsumer(userData) {
         const tableStructure = await checkTableStructure();
         const selectFields = ['id', 'username', 'email', 'mobile', 'status'];
         
+        // Add profile_photo_url to select fields if column exists
         if (tableStructure?.consumers?.hasProfilePhotoUrl) {
             selectFields.push('profile_photo_url');
         }
@@ -325,6 +330,9 @@ async function insertConsumer(userData) {
         // Always add profile_photo_url, even if empty string
         if (tableStructure?.consumers?.hasProfilePhotoUrl) {
             consumerData.profile_photo_url = profilePhotoUrl;
+            console.log('✅ Setting profile_photo_url:', profilePhotoUrl || '(empty string)');
+        } else {
+            console.log('⚠️ consumers table does not have profile_photo_url column');
         }
         
         console.log('📝 Consumer data to insert:', Object.keys(consumerData));
@@ -348,6 +356,11 @@ async function insertConsumer(userData) {
                 console.error('\n🔧 MISSING COLUMN DETECTED!');
                 console.error('The error indicates a column does not exist.');
                 console.error('Check your table structure and add missing columns.');
+            } else if (error.code === '23502') {
+                console.error('\n🔧 NULL CONSTRAINT VIOLATION!');
+                console.error('The profile_photo_url column has a NOT NULL constraint.');
+                console.error('Make sure you are always providing a value for this column.');
+                console.error('Current value being sent:', profilePhotoUrl);
             }
             
             throw error;
