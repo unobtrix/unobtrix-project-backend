@@ -241,19 +241,46 @@ async function checkTableStructure() {
             consumerColumns = Object.keys(consumerData[0]);
         }
         
+        // Determine ID type
+        let consumerIdType = 'unknown';
+        if (consumerData && consumerData.length > 0 && consumerData[0].id !== undefined) {
+            const idValue = consumerData[0].id;
+            if (typeof idValue === 'string' && idValue.includes('-')) {
+                consumerIdType = 'uuid';
+            } else if (typeof idValue === 'number' || typeof idValue === 'bigint') {
+                consumerIdType = 'bigint';
+            } else if (typeof idValue === 'string' && /^\d+$/.test(idValue)) {
+                consumerIdType = 'bigint_string';
+            }
+        }
+        
+        let farmerIdType = 'unknown';
+        if (farmerData && farmerData.length > 0 && farmerData[0].id !== undefined) {
+            const idValue = farmerData[0].id;
+            if (typeof idValue === 'string' && idValue.includes('-')) {
+                farmerIdType = 'uuid';
+            } else if (typeof idValue === 'number' || typeof idValue === 'bigint') {
+                farmerIdType = 'bigint';
+            } else if (typeof idValue === 'string' && /^\d+$/.test(idValue)) {
+                farmerIdType = 'bigint_string';
+            }
+        }
+        
         return {
             farmers: {
                 columns: farmerColumns,
                 hasUpdatedAt: farmerColumns.includes('updated_at'),
                 hasCreatedAt: farmerColumns.includes('created_at'),
                 hasAccountVerified: farmerColumns.includes('account_verified'),
-                hasProfilePhotoUrl: farmerColumns.includes('profile_photo_url') // Check this
+                hasProfilePhotoUrl: farmerColumns.includes('profile_photo_url'),
+                idType: farmerIdType
             },
             consumers: {
                 columns: consumerColumns,
                 hasUpdatedAt: consumerColumns.includes('updated_at'),
                 hasCreatedAt: consumerColumns.includes('created_at'),
-                hasProfilePhotoUrl: consumerColumns.includes('profile_photo_url') // Add this if missing
+                hasProfilePhotoUrl: consumerColumns.includes('profile_photo_url'),
+                idType: consumerIdType
             }
         };
         
@@ -335,8 +362,10 @@ async function insertConsumer(userData) {
             console.log('⚠️ consumers table does not have profile_photo_url column');
         }
         
-        console.log('📝 Consumer data to insert:', Object.keys(consumerData));
+        // IMPORTANT: Don't include id in insert - it will be auto-generated as bigint
+        console.log('📝 Consumer data to insert (without id - auto-generated):', Object.keys(consumerData));
         console.log('📋 Will select:', selectFields);
+        console.log('ℹ️  ID will be auto-generated as bigint (int8)');
         
         const { data, error } = await supabase
             .from('consumers')
@@ -361,12 +390,19 @@ async function insertConsumer(userData) {
                 console.error('The profile_photo_url column has a NOT NULL constraint.');
                 console.error('Make sure you are always providing a value for this column.');
                 console.error('Current value being sent:', profilePhotoUrl);
+            } else if (error.code === '22P02') {
+                console.error('\n🔧 INVALID TEXT REPRESENTATION!');
+                console.error('This might be due to ID column type mismatch.');
+                console.error('Ensure consumers.id column is BIGINT (int8) in database.');
             }
             
             throw error;
         }
 
-        console.log('✅ Consumer saved successfully! ID:', data[0].id);
+        console.log('✅ Consumer saved successfully!');
+        console.log(`✅ ID (bigint): ${data[0].id}`);
+        console.log(`✅ ID type: ${typeof data[0].id}`);
+        
         if (data[0].profile_photo_url !== undefined) {
             console.log('📸 Photo URL in database:', data[0].profile_photo_url || '(empty string)');
         }
@@ -569,13 +605,17 @@ app.get('/health', async (req, res) => {
         
         res.json({ 
             status: 'healthy',
-            server: 'FarmTrials Registration API v7.0',
+            server: 'FarmTrials Registration API v8.0',
             timestamp: new Date().toISOString(),
             supabase: 'Connected',
             storage: 'Supabase Storage ready',
             table_structure: tableStructure,
-            note: 'Adapting to actual table structure',
-            features: ['registration', 'image-upload', 'otp-verification'],
+            note: 'Consumers ID converted to BIGINT (int8)',
+            id_types: {
+                consumers: tableStructure?.consumers?.idType || 'unknown',
+                farmers: tableStructure?.farmers?.idType || 'unknown'
+            },
+            features: ['registration', 'image-upload', 'otp-verification', 'bigint-ids'],
             endpoints: {
                 health: 'GET /health',
                 check_structure: 'GET /api/check-structure',
@@ -586,7 +626,8 @@ app.get('/health', async (req, res) => {
                 aadhaar_otp: 'POST /api/aadhaar/send-otp',
                 verify_aadhaar: 'POST /api/aadhaar/verify',
                 upload_photo: 'POST /api/upload-photo',
-                check_bucket: 'GET /api/check-bucket'
+                check_bucket: 'GET /api/check-bucket',
+                fix_consumers_id: 'GET /api/fix-consumers-id'
             }
         });
     } catch (error) {
@@ -603,30 +644,116 @@ app.get('/api/check-structure', async (req, res) => {
     try {
         const structure = await checkTableStructure();
         
-        res.json({
-            success: true,
-            message: 'Table structure check completed',
-            timestamp: new Date().toISOString(),
-            structure: structure,
-            sql_fixes: !structure?.farmers?.hasAccountVerified || !structure?.farmers?.hasCreatedAt ? `
-                -- Run this SQL in Supabase SQL Editor to fix missing columns:
+        let sqlFix = '';
+        if (structure?.consumers?.idType !== 'bigint' && structure?.consumers?.idType !== 'bigint_string') {
+            sqlFix = `
+                -- Run this SQL in Supabase SQL Editor to convert consumers id to bigint:
                 
-                -- Add account_verified if missing
+                -- IMPORTANT: BACKUP YOUR DATA FIRST!
+                
+                -- Option 1: If table is empty or you can recreate it (RECOMMENDED)
+                DROP TABLE IF EXISTS consumers CASCADE;
+                
+                CREATE TABLE consumers (
+                    id BIGSERIAL PRIMARY KEY,
+                    username VARCHAR(255) NOT NULL,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    mobile VARCHAR(20) NOT NULL,
+                    password VARCHAR(255) NOT NULL,
+                    status VARCHAR(50) DEFAULT 'active',
+                    profile_photo_url TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                );
+                
+                -- Option 2: Add missing columns to farmers table if needed
                 ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
-                
-                -- Add created_at if missing  
                 ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
-                
-                -- Add profile_photo_url if missing (with NOT NULL constraint)
+                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
+            `;
+        } else if (!structure?.farmers?.hasAccountVerified || !structure?.farmers?.hasCreatedAt) {
+            sqlFix = `
+                -- Add missing columns to farmers table
+                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
+                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
                 ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
                 
                 -- Add to consumers table if needed
                 ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
                 ALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();
-            ` : 'All required columns exist'
+            `;
+        } else {
+            sqlFix = 'All required columns exist and consumers.id is BIGINT';
+        }
+        
+        res.json({
+            success: true,
+            message: 'Table structure check completed',
+            timestamp: new Date().toISOString(),
+            structure: structure,
+            sql_fixes: sqlFix,
+            critical_issue: structure?.consumers?.idType !== 'bigint' && structure?.consumers?.idType !== 'bigint_string' ? 
+                '❌ Consumers ID is not BIGINT - registration will fail!' : 
+                '✅ Consumers ID is correctly set as BIGINT'
         });
     } catch (error) {
         console.error('Structure check error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// ==================== NEW ENDPOINT: FIX CONSUMERS ID ====================
+app.get('/api/fix-consumers-id', async (req, res) => {
+    try {
+        const structure = await checkTableStructure();
+        
+        if (structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string') {
+            return res.json({
+                success: true,
+                message: 'Consumers ID is already BIGINT',
+                current_type: structure.consumers.idType,
+                action_required: 'No action needed'
+            });
+        }
+        
+        res.json({
+            success: true,
+            message: 'Consumers ID needs to be converted to BIGINT',
+            current_type: structure?.consumers?.idType || 'unknown',
+            instructions: 'Run the following SQL in Supabase SQL Editor:',
+            sql_commands: [
+                '-- ===== OPTION 1: DROP AND RECREATE (EMPTY TABLE) =====',
+                '-- WARNING: This will delete all existing consumer data!',
+                'DROP TABLE IF EXISTS consumers CASCADE;',
+                '',
+                'CREATE TABLE consumers (',
+                '    id BIGSERIAL PRIMARY KEY,',
+                '    username VARCHAR(255) NOT NULL,',
+                '    email VARCHAR(255) UNIQUE NOT NULL,',
+                '    mobile VARCHAR(20) NOT NULL,',
+                '    password VARCHAR(255) NOT NULL,',
+                '    status VARCHAR(50) DEFAULT \'active\',',
+                '    profile_photo_url TEXT NOT NULL DEFAULT \'\',',
+                '    created_at TIMESTAMP DEFAULT NOW(),',
+                '    updated_at TIMESTAMP DEFAULT NOW()',
+                ');',
+                '',
+                '-- ===== OPTION 2: MIGRATION WITH DATA (COMPLEX) =====',
+                '-- Contact for assistance if you need to preserve data',
+                '',
+                '-- ===== ALSO FIX FARMERS TABLE IF NEEDED =====',
+                'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;',
+                'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();',
+                'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';'
+            ].join('\n'),
+            warning: 'Backup your data before running these commands!'
+        });
+        
+    } catch (error) {
+        console.error('Fix consumers ID error:', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -1086,7 +1213,8 @@ app.post('/api/register/consumer', async (req, res) => {
             return res.status(500).json({ 
                 success: false, 
                 message: 'Failed to create account. Please try again.',
-                error: result.error 
+                error: result.error,
+                note: result.error?.includes('id') ? 'Check if consumers.id column is BIGINT in database' : ''
             });
         }
         
@@ -1125,7 +1253,8 @@ app.post('/api/register/consumer', async (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Registration failed. Please try again.',
-            error: error.message 
+            error: error.message,
+            id_issue: error.message?.includes('id') ? 'Check consumers.id column type (should be BIGINT)' : ''
         });
     }
 });
@@ -1330,10 +1459,20 @@ app.get('/api/debug/users', async (req, res) => {
             .select('id, username, email, mobile, farm_name, status')
             .limit(5);
         
+        // Check ID types
+        let consumerIdType = 'unknown';
+        if (consumers && consumers.length > 0) {
+            const id = consumers[0].id;
+            if (typeof id === 'string' && id.includes('-')) consumerIdType = 'uuid';
+            else if (typeof id === 'number') consumerIdType = 'bigint';
+            else if (typeof id === 'string' && /^\d+$/.test(id)) consumerIdType = 'bigint_string';
+        }
+        
         res.json({
             success: true,
             consumers_count: consumers?.length || 0,
             farmers_count: farmers?.length || 0,
+            consumers_id_type: consumerIdType,
             consumers: consumers || [],
             farmers: farmers || []
         });
@@ -1353,11 +1492,13 @@ app.get('/', async (req, res) => {
         
         res.json({ 
             server: 'FarmTrials Registration API',
-            version: '7.0',
+            version: '8.0',
             status: 'operational',
             timestamp: new Date().toISOString(),
-            note: 'Adapting to actual table structure',
+            note: 'Consumers ID converted to BIGINT (int8)',
             table_issues: {
+                consumers_id_type: structure?.consumers?.idType || 'unknown',
+                consumers_id_is_bigint: structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string',
                 farmers_missing_updated_at: !structure?.farmers?.hasUpdatedAt,
                 farmers_missing_account_verified: !structure?.farmers?.hasAccountVerified,
                 farmers_missing_created_at: !structure?.farmers?.hasCreatedAt
@@ -1369,11 +1510,13 @@ app.get('/', async (req, res) => {
                 registration: 'Consumer & Farmer',
                 otp: 'Mobile & Aadhaar verification',
                 security: 'Password hashing with bcrypt',
-                account_verification: 'Farmer account verification (if column exists)'
+                consumer_ids: 'BIGINT (auto-incrementing)',
+                farmer_ids: structure?.farmers?.idType === 'uuid' ? 'UUID' : 'Unknown'
             },
             endpoints: {
                 health: 'GET /health',
                 check_structure: 'GET /api/check-structure',
+                fix_consumers_id: 'GET /api/fix-consumers-id',
                 check_bucket: 'GET /api/check-bucket',
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
@@ -1444,7 +1587,7 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, async () => {
     console.log(`
-    🚀 FarmTrials Backend Server v7.0
+    🚀 FarmTrials Backend Server v8.0
     📍 Port: ${PORT}
     🔗 Supabase: Connected
     ⏰ Started: ${new Date().toISOString()}
@@ -1470,25 +1613,46 @@ app.listen(PORT, async () => {
     console.log('\n🔍 Checking table structure...');
     const structure = await checkTableStructure();
     
+    const consumersIdOk = structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string';
+    
     console.log(`
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
+    🆔 Consumers ID: ${consumersIdOk ? '✅ BIGINT (int8)' : `❌ ${structure?.consumers?.idType || 'Unknown'} - FIX REQUIRED!`}
     🕒 Timestamps: ${structure?.farmers?.hasCreatedAt ? '✅ created_at exists' : '❌ created_at missing'}
     ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
     📸 Profile Photo URL: ${structure?.farmers?.hasProfilePhotoUrl ? '✅ Column exists' : '❌ Column missing'}
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
-    ⚠️ CRITICAL: Farmers table must have profile_photo_url column with NOT NULL constraint
-    If missing, run this SQL:
+    ${!consumersIdOk ? `
+    ⚠️ CRITICAL: Consumers table id must be BIGINT (int8)
+    If not, run this SQL in Supabase SQL Editor:
     
-    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
+    DROP TABLE IF EXISTS consumers CASCADE;
+    
+    CREATE TABLE consumers (
+        id BIGSERIAL PRIMARY KEY,
+        username VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        mobile VARCHAR(20) NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        status VARCHAR(50) DEFAULT 'active',
+        profile_photo_url TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+    
+    OR visit: GET /api/fix-consumers-id for detailed instructions
+    ` : '✅ Consumers ID is correctly set as BIGINT'}
     
     ✅ Server is running with adaptive structure!
     
     📋 Test endpoints:
        GET  /health                    - Health check
        GET  /api/check-structure       - Check table structure
+       GET  /api/fix-consumers-id      - Get SQL to fix consumers ID
        GET  /api/check-bucket          - Check bucket status
+       POST /api/register/consumer     - Register consumer
        POST /api/register/farmer       - Register farmer
        GET  /api/debug/users           - Check existing users
     `);
