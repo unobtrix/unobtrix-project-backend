@@ -269,7 +269,7 @@ async function insertConsumer(userData) {
         
         const hashedPassword = await hashPassword(userData.password);
         
-        let profilePhotoUrl = null;
+        let profilePhotoUrl = '';
         
         const photoData = userData.profile_photo_base64 || userData.profile_photo_url;
         
@@ -277,22 +277,23 @@ async function insertConsumer(userData) {
             console.log('📸 Processing profile photo upload...');
             
             const tempUserId = userData.username.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-            profilePhotoUrl = await uploadToSupabaseStorage(
+            const uploadedUrl = await uploadToSupabaseStorage(
                 photoData,
                 'consumer',
                 tempUserId
             );
             
-            if (!profilePhotoUrl) {
-                console.log('⚠️ Photo upload failed, continuing without photo');
-            } else {
+            if (uploadedUrl) {
+                profilePhotoUrl = uploadedUrl;
                 console.log('✅ Photo uploaded to:', profilePhotoUrl);
+            } else {
+                console.log('⚠️ Photo upload failed, using empty string');
             }
         } else if (photoData && photoData.includes('http')) {
             profilePhotoUrl = photoData;
             console.log('✅ Using existing photo URL:', profilePhotoUrl);
-        } else if (photoData) {
-            console.log('⚠️ Invalid photo data format');
+        } else {
+            console.log('⚠️ No valid photo data provided, using empty string');
         }
         
         console.log('💾 Inserting consumer into database...');
@@ -301,7 +302,7 @@ async function insertConsumer(userData) {
         const tableStructure = await checkTableStructure();
         const selectFields = ['id', 'username', 'email', 'mobile', 'status'];
         
-        if (profilePhotoUrl && tableStructure?.consumers?.hasProfilePhotoUrl) {
+        if (tableStructure?.consumers?.hasProfilePhotoUrl) {
             selectFields.push('profile_photo_url');
         }
         
@@ -321,8 +322,8 @@ async function insertConsumer(userData) {
             status: 'active'
         };
         
-        // Only add profile_photo_url if column exists
-        if (profilePhotoUrl && tableStructure?.consumers?.hasProfilePhotoUrl) {
+        // Always add profile_photo_url, even if empty string
+        if (tableStructure?.consumers?.hasProfilePhotoUrl) {
             consumerData.profile_photo_url = profilePhotoUrl;
         }
         
@@ -353,8 +354,8 @@ async function insertConsumer(userData) {
         }
 
         console.log('✅ Consumer saved successfully! ID:', data[0].id);
-        if (data[0].profile_photo_url) {
-            console.log('📸 Photo URL in database:', data[0].profile_photo_url);
+        if (data[0].profile_photo_url !== undefined) {
+            console.log('📸 Photo URL in database:', data[0].profile_photo_url || '(empty string)');
         }
         if (data[0].created_at) {
             console.log('🕒 Created at:', data[0].created_at);
@@ -377,7 +378,8 @@ async function insertFarmer(farmerData) {
         
         const hashedPassword = await hashPassword(farmerData.password);
         
-        let profilePhotoUrl = null;
+        // Initialize with empty string to satisfy NOT NULL constraint
+        let profilePhotoUrl = '';
         
         const photoData = farmerData.profile_photo_base64 || farmerData.profile_photo_url;
         
@@ -385,20 +387,25 @@ async function insertFarmer(farmerData) {
             console.log('📸 Processing farmer profile photo upload...');
             
             const tempUserId = farmerData.username.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-            profilePhotoUrl = await uploadToSupabaseStorage(
+            const uploadedUrl = await uploadToSupabaseStorage(
                 photoData,
                 'farmer',
                 tempUserId
             );
             
-            if (!profilePhotoUrl) {
-                console.log('⚠️ Farmer photo upload failed, continuing without photo');
-            } else {
+            if (uploadedUrl) {
+                profilePhotoUrl = uploadedUrl;
                 console.log('✅ Farmer photo uploaded to:', profilePhotoUrl);
+            } else {
+                console.log('⚠️ Farmer photo upload failed, using empty string');
+                // profilePhotoUrl remains empty string
             }
         } else if (photoData && photoData.includes('http')) {
             profilePhotoUrl = photoData;
             console.log('✅ Using existing farmer photo URL:', profilePhotoUrl);
+        } else {
+            console.log('⚠️ No valid photo data provided, using empty string');
+            // profilePhotoUrl remains empty string
         }
 
         let certificationsArray = [];
@@ -427,10 +434,9 @@ async function insertFarmer(farmerData) {
             selectFields.push('created_at');
         }
         
-        // NO updated_at - your table doesn't have it!
-        // if (tableStructure?.farmers?.hasUpdatedAt) {
-        //     selectFields.push('updated_at');
-        // }
+        if (tableStructure?.farmers?.hasProfilePhotoUrl) {
+            selectFields.push('profile_photo_url');
+        }
         
         const farmerInsertData = {
             username: farmerData.username,
@@ -438,6 +444,7 @@ async function insertFarmer(farmerData) {
             aadhaar_number: farmerData.aadhaar_number,
             mobile: farmerData.mobile,
             password: hashedPassword,
+            profile_photo_url: profilePhotoUrl, // ALWAYS set this, even if empty string
             farm_name: farmerData.farm_name,
             farm_size: parseFloat(farmerData.farm_size) || 0,
             specialization: farmerData.specialization || 'Not specified',
@@ -464,6 +471,7 @@ async function insertFarmer(farmerData) {
         }
         
         console.log('📝 Farmer data to insert:', Object.keys(farmerInsertData));
+        console.log('📝 profile_photo_url value:', profilePhotoUrl || '(empty string)');
         console.log('📋 Will select:', selectFields);
         
         const { data, error } = await supabase
@@ -490,7 +498,7 @@ async function insertFarmer(farmerData) {
                 console.error('2. Add missing columns:');
                 console.error('   - account_verified (BOOLEAN DEFAULT false)');
                 console.error('   - created_at (TIMESTAMP DEFAULT now())');
-                console.error('3. Remove "updated_at" from SELECT queries');
+                console.error('   - profile_photo_url (TEXT NOT NULL DEFAULT "")');
                 console.error('\n💡 QUICK FIX: Run this SQL in Supabase SQL Editor:');
                 console.error(`
                     -- Add account_verified if missing
@@ -499,10 +507,18 @@ async function insertFarmer(farmerData) {
                     -- Add created_at if missing  
                     ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
                     
+                    -- Add profile_photo_url if missing (with NOT NULL constraint)
+                    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
+                    
                     -- Verify columns exist
                     SELECT column_name FROM information_schema.columns 
                     WHERE table_name = 'farmers' AND table_schema = 'public';
                 `);
+            } else if (error.code === '23502') {
+                console.error('\n🔧 NULL CONSTRAINT VIOLATION!');
+                console.error('The profile_photo_url column has a NOT NULL constraint.');
+                console.error('Make sure you are always providing a value for this column.');
+                console.error('Current value being sent:', profilePhotoUrl);
             }
             
             throw error;
@@ -514,6 +530,10 @@ async function insertFarmer(farmerData) {
         
         if (data[0].account_verified !== undefined) {
             console.log('✅ Account verified:', data[0].account_verified);
+        }
+        
+        if (data[0].profile_photo_url !== undefined) {
+            console.log('✅ Profile photo URL:', data[0].profile_photo_url || '(empty string)');
         }
         
         if (data[0].created_at) {
@@ -583,6 +603,9 @@ app.get('/api/check-structure', async (req, res) => {
                 
                 -- Add created_at if missing  
                 ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
+                
+                -- Add profile_photo_url if missing (with NOT NULL constraint)
+                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
                 
                 -- Add to consumers table if needed
                 ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
@@ -1069,7 +1092,7 @@ app.post('/api/register/consumer', async (req, res) => {
             }
         };
         
-        if (result.data.profile_photo_url) {
+        if (result.data.profile_photo_url !== undefined) {
             responseData.user.profile_photo_url = result.data.profile_photo_url;
             responseData.user.storage_note = 'Profile photo stored in Supabase Storage';
         }
@@ -1216,6 +1239,10 @@ app.post('/api/register/farmer', async (req, res) => {
         
         if (result.data.account_verified !== undefined) {
             responseData.farmer.account_verified = result.data.account_verified;
+        }
+        
+        if (result.data.profile_photo_url !== undefined) {
+            responseData.farmer.profile_photo_url = result.data.profile_photo_url;
         }
         
         if (result.data.created_at) {
@@ -1434,26 +1461,14 @@ app.listen(PORT, async () => {
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
     🕒 Timestamps: ${structure?.farmers?.hasCreatedAt ? '✅ created_at exists' : '❌ created_at missing'}
     ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
-    📸 Images: ${bucketExists ? 'Will be stored in Supabase Storage' : 'Uploads will fail until bucket is created'}
+    📸 Profile Photo URL: ${structure?.farmers?.hasProfilePhotoUrl ? '✅ Column exists' : '❌ Column missing'}
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
-    ⚠️ CRITICAL ISSUE DETECTED:
-    Your farmers table is missing columns!
+    ⚠️ CRITICAL: Farmers table must have profile_photo_url column with NOT NULL constraint
+    If missing, run this SQL:
     
-    ${!structure?.farmers?.hasAccountVerified ? '❌ account_verified column missing\n' : ''}
-    ${!structure?.farmers?.hasCreatedAt ? '❌ created_at column missing\n' : ''}
-    ${structure?.farmers?.hasUpdatedAt ? '✅ updated_at column exists' : '✅ updated_at column not required'}
-    
-    🔧 REQUIRED FIX:
-    1. Go to Supabase Dashboard → SQL Editor
-    2. Run this SQL:
-    
-    -- Add missing columns to farmers table
-    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
-    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
-    
-    3. Check structure: GET /api/check-structure
+    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
     
     ✅ Server is running with adaptive structure!
     
