@@ -294,6 +294,7 @@ async function checkTableStructure() {
 async function insertConsumer(userData) {
     try {
         console.log('💾 Starting consumer registration...');
+        console.log('📊 Received user data keys:', Object.keys(userData));
         
         const hashedPassword = await hashPassword(userData.password);
         
@@ -301,11 +302,14 @@ async function insertConsumer(userData) {
         let profilePhotoUrl = '';
         
         const photoData = userData.profile_photo_base64 || userData.profile_photo_url;
+        console.log('📸 Photo data present:', !!photoData);
         
         if (photoData && photoData.startsWith('data:image/')) {
-            console.log('📸 Processing profile photo upload...');
+            console.log('📸 Processing profile photo upload to storage...');
             
             const tempUserId = userData.username.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
+            console.log('📤 Uploading to storage with temp ID:', tempUserId);
+            
             const uploadedUrl = await uploadToSupabaseStorage(
                 photoData,
                 'consumer',
@@ -314,28 +318,34 @@ async function insertConsumer(userData) {
             
             if (uploadedUrl) {
                 profilePhotoUrl = uploadedUrl;
-                console.log('✅ Photo uploaded to:', profilePhotoUrl);
+                console.log('✅ Photo uploaded to storage URL:', profilePhotoUrl);
             } else {
                 console.log('⚠️ Photo upload failed, using empty string');
-                // profilePhotoUrl remains empty string
+                profilePhotoUrl = ''; // Explicitly set empty string
             }
         } else if (photoData && photoData.includes('http')) {
             profilePhotoUrl = photoData;
             console.log('✅ Using existing photo URL:', profilePhotoUrl);
         } else {
             console.log('⚠️ No valid photo data provided, using empty string');
-            // profilePhotoUrl remains empty string
+            profilePhotoUrl = ''; // Explicitly set empty string
         }
         
         console.log('💾 Inserting consumer into database...');
         
         // Check table structure first
         const tableStructure = await checkTableStructure();
+        console.log('🔍 Consumers table structure:', tableStructure?.consumers);
+        
+        // Always include profile_photo_url in select and insert
         const selectFields = ['id', 'username', 'email', 'mobile', 'status'];
         
-        // Add profile_photo_url to select fields if column exists
+        // CRITICAL: Always include profile_photo_url if column exists
         if (tableStructure?.consumers?.hasProfilePhotoUrl) {
             selectFields.push('profile_photo_url');
+            console.log('✅ profile_photo_url column exists in consumers table');
+        } else {
+            console.log('❌ profile_photo_url column does NOT exist in consumers table - NEEDS TO BE ADDED');
         }
         
         if (tableStructure?.consumers?.hasCreatedAt) {
@@ -346,6 +356,7 @@ async function insertConsumer(userData) {
             selectFields.push('updated_at');
         }
         
+        // Build consumer data object
         const consumerData = {
             username: userData.username,
             email: userData.email,
@@ -354,16 +365,21 @@ async function insertConsumer(userData) {
             status: 'active'
         };
         
-        // Always add profile_photo_url, even if empty string
-        if (tableStructure?.consumers?.hasProfilePhotoUrl) {
+        // CRITICAL: Always add profile_photo_url to the insert data
+        // Check if column exists in table
+        if (tableStructure?.consumers?.columns?.includes('profile_photo_url')) {
             consumerData.profile_photo_url = profilePhotoUrl;
-            console.log('✅ Setting profile_photo_url:', profilePhotoUrl || '(empty string)');
+            console.log('✅ Adding profile_photo_url to insert data:', profilePhotoUrl || '(empty string)');
         } else {
-            console.log('⚠️ consumers table does not have profile_photo_url column');
+            console.log('❌ WARNING: profile_photo_url column not found in consumers table');
+            console.log('📋 Available columns:', tableStructure?.consumers?.columns || []);
+            
+            // Try to add it anyway in case the check failed
+            consumerData.profile_photo_url = profilePhotoUrl;
+            console.log('⚠️ Attempting to add profile_photo_url anyway:', profilePhotoUrl || '(empty string)');
         }
         
-        // IMPORTANT: Don't include id in insert - it will be auto-generated as bigint
-        console.log('📝 Consumer data to insert (without id - auto-generated):', Object.keys(consumerData));
+        console.log('📝 Final consumer data to insert:', Object.keys(consumerData));
         console.log('📋 Will select:', selectFields);
         console.log('ℹ️  ID will be auto-generated as bigint (int8)');
         
@@ -383,13 +399,21 @@ async function insertConsumer(userData) {
             
             if (error.code === '42703') {
                 console.error('\n🔧 MISSING COLUMN DETECTED!');
-                console.error('The error indicates a column does not exist.');
-                console.error('Check your table structure and add missing columns.');
+                console.error('The profile_photo_url column might not exist in the consumers table.');
+                console.error('\n🛠️ FIX: Run this SQL in Supabase SQL Editor:');
+                console.error(`
+                    -- Add profile_photo_url column to consumers table
+                    ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
+                    
+                    -- Verify the column was added
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = 'consumers' AND table_schema = 'public';
+                `);
             } else if (error.code === '23502') {
                 console.error('\n🔧 NULL CONSTRAINT VIOLATION!');
-                console.error('The profile_photo_url column has a NOT NULL constraint.');
-                console.error('Make sure you are always providing a value for this column.');
+                console.error('The profile_photo_url column has a NOT NULL constraint but no default value.');
                 console.error('Current value being sent:', profilePhotoUrl);
+                console.error('\n🛠️ FIX: Ensure you always send a value (even empty string)');
             } else if (error.code === '22P02') {
                 console.error('\n🔧 INVALID TEXT REPRESENTATION!');
                 console.error('This might be due to ID column type mismatch.');
@@ -401,22 +425,87 @@ async function insertConsumer(userData) {
 
         console.log('✅ Consumer saved successfully!');
         console.log(`✅ ID (bigint): ${data[0].id}`);
-        console.log(`✅ ID type: ${typeof data[0].id}`);
+        console.log(`✅ Username: ${data[0].username}`);
+        console.log(`✅ Email: ${data[0].email}`);
         
+        // Check if profile_photo_url was returned
         if (data[0].profile_photo_url !== undefined) {
-            console.log('📸 Photo URL in database:', data[0].profile_photo_url || '(empty string)');
+            console.log('📸 Photo URL saved in database:', data[0].profile_photo_url || '(empty string)');
+        } else {
+            console.log('❌ profile_photo_url not returned in response - column might not exist');
         }
+        
         if (data[0].created_at) {
             console.log('🕒 Created at:', data[0].created_at);
         }
         if (data[0].updated_at) {
             console.log('🕒 Updated at:', data[0].updated_at);
         }
+        
         return { success: true, data: data[0] };
         
     } catch (error) {
         console.error('❌ Error in insertConsumer:', error);
         console.error('Full error object:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// ==================== NEW FUNCTION: ADD MISSING COLUMN TO CONSUMERS ====================
+async function addMissingColumnToConsumers() {
+    try {
+        console.log('🔍 Checking and fixing consumers table columns...');
+        
+        // First, check current structure
+        const tableStructure = await checkTableStructure();
+        const missingColumns = [];
+        
+        if (!tableStructure?.consumers?.hasProfilePhotoUrl) {
+            missingColumns.push('profile_photo_url');
+        }
+        
+        if (!tableStructure?.consumers?.hasCreatedAt) {
+            missingColumns.push('created_at');
+        }
+        
+        if (!tableStructure?.consumers?.hasUpdatedAt) {
+            missingColumns.push('updated_at');
+        }
+        
+        if (missingColumns.length === 0) {
+            console.log('✅ All required columns exist in consumers table');
+            return { success: true, message: 'All columns exist' };
+        }
+        
+        console.log('❌ Missing columns in consumers table:', missingColumns);
+        
+        // Provide SQL to fix
+        const sqlCommands = [];
+        
+        if (missingColumns.includes('profile_photo_url')) {
+            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';');
+        }
+        
+        if (missingColumns.includes('created_at')) {
+            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();');
+        }
+        
+        if (missingColumns.includes('updated_at')) {
+            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();');
+        }
+        
+        const sql = sqlCommands.join('\n');
+        
+        return {
+            success: false,
+            message: 'Missing columns detected',
+            missingColumns,
+            sql_fix: sql,
+            instructions: 'Run the above SQL in Supabase SQL Editor to fix the consumers table'
+        };
+        
+    } catch (error) {
+        console.error('Error checking consumers table:', error);
         return { success: false, error: error.message };
     }
 }
@@ -639,19 +728,20 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// ==================== CHECK STRUCTURE ENDPOINT ====================
+// ==================== UPDATED CHECK STRUCTURE ENDPOINT ====================
 app.get('/api/check-structure', async (req, res) => {
     try {
         const structure = await checkTableStructure();
+        const consumersFix = await addMissingColumnToConsumers();
         
         let sqlFix = '';
+        let criticalIssues = [];
+        
+        // Check ID type
         if (structure?.consumers?.idType !== 'bigint' && structure?.consumers?.idType !== 'bigint_string') {
-            sqlFix = `
-                -- Run this SQL in Supabase SQL Editor to convert consumers id to bigint:
-                
-                -- IMPORTANT: BACKUP YOUR DATA FIRST!
-                
-                -- Option 1: If table is empty or you can recreate it (RECOMMENDED)
+            sqlFix += `
+                -- ===== FIX CONSUMERS ID (MUST BE BIGINT) =====
+                -- WARNING: This will delete all existing consumer data!
                 DROP TABLE IF EXISTS consumers CASCADE;
                 
                 CREATE TABLE consumers (
@@ -665,24 +755,30 @@ app.get('/api/check-structure', async (req, res) => {
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
                 );
-                
-                -- Option 2: Add missing columns to farmers table if needed
-                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
-                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
-                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
-            `;
-        } else if (!structure?.farmers?.hasAccountVerified || !structure?.farmers?.hasCreatedAt) {
-            sqlFix = `
-                -- Add missing columns to farmers table
-                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
-                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
-                ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
-                
-                -- Add to consumers table if needed
-                ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
-                ALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();
-            `;
-        } else {
+                \n\n`;
+            criticalIssues.push('❌ Consumers ID is not BIGINT - registration will fail!');
+        }
+        
+        // Check missing columns
+        if (!consumersFix.success && consumersFix.missingColumns) {
+            sqlFix += `-- ===== ADD MISSING COLUMNS TO CONSUMERS =====\n`;
+            sqlFix += consumersFix.sql_fix;
+            sqlFix += '\n\n';
+            
+            if (consumersFix.missingColumns.includes('profile_photo_url')) {
+                criticalIssues.push('❌ Consumers table missing profile_photo_url column - photos won\'t be saved!');
+            }
+        }
+        
+        // Check farmers table
+        if (!structure?.farmers?.hasAccountVerified || !structure?.farmers?.hasCreatedAt || !structure?.farmers?.hasProfilePhotoUrl) {
+            sqlFix += `-- ===== ADD MISSING COLUMNS TO FARMERS =====\n`;
+            sqlFix += `ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;\n`;
+            sqlFix += `ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();\n`;
+            sqlFix += `ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';\n`;
+        }
+        
+        if (sqlFix === '') {
             sqlFix = 'All required columns exist and consumers.id is BIGINT';
         }
         
@@ -691,10 +787,9 @@ app.get('/api/check-structure', async (req, res) => {
             message: 'Table structure check completed',
             timestamp: new Date().toISOString(),
             structure: structure,
-            sql_fixes: sqlFix,
-            critical_issue: structure?.consumers?.idType !== 'bigint' && structure?.consumers?.idType !== 'bigint_string' ? 
-                '❌ Consumers ID is not BIGINT - registration will fail!' : 
-                '✅ Consumers ID is correctly set as BIGINT'
+            consumers_status: consumersFix,
+            critical_issues: criticalIssues.length > 0 ? criticalIssues : ['✅ All critical checks passed'],
+            sql_fixes: sqlFix
         });
     } catch (error) {
         console.error('Structure check error:', error);
@@ -754,6 +849,45 @@ app.get('/api/fix-consumers-id', async (req, res) => {
         
     } catch (error) {
         console.error('Fix consumers ID error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// ==================== NEW ENDPOINT: FIX CONSUMERS COLUMNS ====================
+app.get('/api/fix-consumers-columns', async (req, res) => {
+    try {
+        console.log('🔧 Checking consumers table columns...');
+        
+        const result = await addMissingColumnToConsumers();
+        
+        if (result.success) {
+            return res.json({
+                success: true,
+                message: 'All required columns exist in consumers table',
+                timestamp: new Date().toISOString()
+            });
+        }
+        
+        res.json({
+            success: false,
+            message: 'Missing columns in consumers table',
+            timestamp: new Date().toISOString(),
+            missingColumns: result.missingColumns,
+            sql_fix: result.sql_fix,
+            instructions: [
+                '1. Go to Supabase Dashboard → SQL Editor',
+                '2. Copy and paste the SQL commands above',
+                '3. Click "Run"',
+                '4. Wait for execution to complete',
+                '5. Restart your server if needed'
+            ]
+        });
+        
+    } catch (error) {
+        console.error('Fix consumers columns error:', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -1152,6 +1286,7 @@ app.post('/api/test-upload', async (req, res) => {
 });
 
 // ==================== REGISTRATION ENDPOINTS ====================
+// ==================== UPDATED CONSUMER REGISTRATION ENDPOINT ====================
 app.post('/api/register/consumer', async (req, res) => {
     try {
         const { username, email, mobile, password, profile_photo_base64, profile_photo_url } = req.body;
@@ -1195,6 +1330,17 @@ app.post('/api/register/consumer', async (req, res) => {
             });
         }
         
+        // Check table structure before proceeding
+        const consumersFix = await addMissingColumnToConsumers();
+        if (!consumersFix.success && consumersFix.missingColumns.includes('profile_photo_url')) {
+            return res.status(500).json({
+                success: false,
+                message: 'Database configuration issue',
+                error: 'profile_photo_url column missing in consumers table',
+                fix_instructions: 'Visit /api/fix-consumers-columns endpoint for SQL to fix this'
+            });
+        }
+        
         const bucketExists = await checkBucketExists();
         if (!bucketExists) {
             console.log('⚠️ Bucket not found - continuing registration without photo upload');
@@ -1210,11 +1356,19 @@ app.post('/api/register/consumer', async (req, res) => {
         });
         
         if (!result.success) {
+            // Check if it's a column missing error
+            let fixHint = '';
+            if (result.error?.includes('profile_photo_url') || result.error?.includes('42703')) {
+                fixHint = 'profile_photo_url column might be missing. Check /api/fix-consumers-columns';
+            } else if (result.error?.includes('id')) {
+                fixHint = 'Check if consumers.id column is BIGINT in database. Check /api/fix-consumers-id';
+            }
+            
             return res.status(500).json({ 
                 success: false, 
                 message: 'Failed to create account. Please try again.',
                 error: result.error,
-                note: result.error?.includes('id') ? 'Check if consumers.id column is BIGINT in database' : ''
+                fix_hint: fixHint
             });
         }
         
@@ -1233,9 +1387,16 @@ app.post('/api/register/consumer', async (req, res) => {
             }
         };
         
+        // CRITICAL: Check if profile_photo_url exists in response
         if (result.data.profile_photo_url !== undefined) {
             responseData.user.profile_photo_url = result.data.profile_photo_url;
-            responseData.user.storage_note = 'Profile photo stored in Supabase Storage';
+            responseData.user.storage_note = result.data.profile_photo_url ? 
+                'Profile photo stored in Supabase Storage' : 
+                'No profile photo provided';
+        } else {
+            console.warn('⚠️ profile_photo_url not in response - column might not exist in table');
+            responseData.user.profile_photo_url = null;
+            responseData.user.note = 'profile_photo_url column might be missing in database';
         }
         
         if (result.data.created_at) {
@@ -1254,7 +1415,11 @@ app.post('/api/register/consumer', async (req, res) => {
             success: false, 
             message: 'Registration failed. Please try again.',
             error: error.message,
-            id_issue: error.message?.includes('id') ? 'Check consumers.id column type (should be BIGINT)' : ''
+            fix_hints: [
+                'Check /api/check-structure for table issues',
+                'Check /api/fix-consumers-columns for missing columns',
+                'Check /api/fix-consumers-id for ID type issues'
+            ]
         });
     }
 });
@@ -1486,19 +1651,22 @@ app.get('/api/debug/users', async (req, res) => {
 });
 
 // ==================== ROOT ENDPOINT ====================
+// ==================== ADD TO ROOT ENDPOINT ====================
+// In the root endpoint (/), add the new endpoint:
 app.get('/', async (req, res) => {
     try {
         const structure = await checkTableStructure();
         
         res.json({ 
             server: 'FarmTrials Registration API',
-            version: '8.0',
+            version: '8.1',
             status: 'operational',
             timestamp: new Date().toISOString(),
-            note: 'Consumers ID converted to BIGINT (int8)',
+            note: 'Fixed profile_photo_url saving issue',
             table_issues: {
                 consumers_id_type: structure?.consumers?.idType || 'unknown',
                 consumers_id_is_bigint: structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string',
+                consumers_has_profile_photo_url: structure?.consumers?.hasProfilePhotoUrl || false,
                 farmers_missing_updated_at: !structure?.farmers?.hasUpdatedAt,
                 farmers_missing_account_verified: !structure?.farmers?.hasAccountVerified,
                 farmers_missing_created_at: !structure?.farmers?.hasCreatedAt
@@ -1506,17 +1674,18 @@ app.get('/', async (req, res) => {
             features: {
                 supabase: 'Connected',
                 storage: 'Supabase Storage ready',
-                image_upload: 'Base64 → Storage URL',
+                image_upload: 'Base64 → Storage URL → Database',
                 registration: 'Consumer & Farmer',
                 otp: 'Mobile & Aadhaar verification',
                 security: 'Password hashing with bcrypt',
                 consumer_ids: 'BIGINT (auto-incrementing)',
-                farmer_ids: structure?.farmers?.idType === 'uuid' ? 'UUID' : 'Unknown'
+                photo_saving: 'Fixed profile_photo_url saving'
             },
             endpoints: {
                 health: 'GET /health',
                 check_structure: 'GET /api/check-structure',
                 fix_consumers_id: 'GET /api/fix-consumers-id',
+                fix_consumers_columns: 'GET /api/fix-consumers-columns',
                 check_bucket: 'GET /api/check-bucket',
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
@@ -1533,7 +1702,10 @@ app.get('/', async (req, res) => {
                     storage: 'GET /api/debug/storage',
                     users: 'GET /api/debug/users'
                 }
-            }
+            },
+            critical_check: !structure?.consumers?.hasProfilePhotoUrl ? 
+                '❌ profile_photo_url column missing - run /api/fix-consumers-columns' : 
+                '✅ profile_photo_url column exists'
         });
     } catch (error) {
         res.json({
@@ -1585,9 +1757,11 @@ setInterval(() => {
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
 
+// ==================== UPDATED SERVER START MESSAGE ====================
+// In the server.listen() callback, update the startup message:
 app.listen(PORT, async () => {
     console.log(`
-    🚀 FarmTrials Backend Server v8.0
+    🚀 FarmTrials Backend Server v8.1
     📍 Port: ${PORT}
     🔗 Supabase: Connected
     ⏰ Started: ${new Date().toISOString()}
@@ -1612,48 +1786,39 @@ app.listen(PORT, async () => {
     
     console.log('\n🔍 Checking table structure...');
     const structure = await checkTableStructure();
+    const consumersFix = await addMissingColumnToConsumers();
     
     const consumersIdOk = structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string';
+    const consumersHasPhotoColumn = structure?.consumers?.hasProfilePhotoUrl;
     
     console.log(`
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
     🆔 Consumers ID: ${consumersIdOk ? '✅ BIGINT (int8)' : `❌ ${structure?.consumers?.idType || 'Unknown'} - FIX REQUIRED!`}
+    📸 Profile Photo Column: ${consumersHasPhotoColumn ? '✅ Exists' : '❌ MISSING - photos won\'t save!'}
     🕒 Timestamps: ${structure?.farmers?.hasCreatedAt ? '✅ created_at exists' : '❌ created_at missing'}
     ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
-    📸 Profile Photo URL: ${structure?.farmers?.hasProfilePhotoUrl ? '✅ Column exists' : '❌ Column missing'}
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
     ${!consumersIdOk ? `
     ⚠️ CRITICAL: Consumers table id must be BIGINT (int8)
-    If not, run this SQL in Supabase SQL Editor:
+    Visit: GET /api/fix-consumers-id for SQL commands
+    ` : ''}
     
-    DROP TABLE IF EXISTS consumers CASCADE;
+    ${!consumersHasPhotoColumn ? `
+    ⚠️ CRITICAL: Consumers table missing profile_photo_url column
+    Visit: GET /api/fix-consumers-columns for SQL commands
+    ` : ''}
     
-    CREATE TABLE consumers (
-        id BIGSERIAL PRIMARY KEY,
-        username VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        mobile VARCHAR(20) NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        status VARCHAR(50) DEFAULT 'active',
-        profile_photo_url TEXT NOT NULL DEFAULT '',
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-    );
+    ✅ Server is running with enhanced photo saving!
     
-    OR visit: GET /api/fix-consumers-id for detailed instructions
-    ` : '✅ Consumers ID is correctly set as BIGINT'}
-    
-    ✅ Server is running with adaptive structure!
-    
-    📋 Test endpoints:
+    📋 Diagnostic endpoints:
        GET  /health                    - Health check
        GET  /api/check-structure       - Check table structure
-       GET  /api/fix-consumers-id      - Get SQL to fix consumers ID
+       GET  /api/fix-consumers-id      - Fix consumers ID type
+       GET  /api/fix-consumers-columns - Add missing columns
        GET  /api/check-bucket          - Check bucket status
-       POST /api/register/consumer     - Register consumer
-       POST /api/register/farmer       - Register farmer
+       POST /api/register/consumer     - Test registration
        GET  /api/debug/users           - Check existing users
     `);
 });
