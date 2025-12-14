@@ -698,7 +698,7 @@ async function insertFarmer(farmerData) {
 
 // ==================== LOGIN ENDPOINTS ====================
 // GET endpoint for testing login (optional - can be removed in production)
-/*app.get('/api/login', (req, res) => {
+app.get('/api/login', (req, res) => {
     res.json({
         success: true,
         message: 'Login endpoint is available',
@@ -706,7 +706,7 @@ async function insertFarmer(farmerData) {
             method: 'POST',
             required_fields: ['email', 'password'],
             optional_field: 'userType (default: "consumer")',
-            example_request: {
+            /*example_request: {
                 email: 'user@example.com',
                 password: 'password123',
                 userType: 'consumer'
@@ -722,12 +722,12 @@ async function insertFarmer(farmerData) {
                     profile_photo_url: 'https://...',
                     user_type: 'consumer'
                 }
-            }
+            }*/
         },
         note: 'Use POST method for actual login'
     });
 });
-*/
+
 // POST endpoint for actual login
 app.post('/api/login', async (req, res) => {
     try {
