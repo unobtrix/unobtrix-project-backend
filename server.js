@@ -698,7 +698,7 @@ async function insertFarmer(farmerData) {
 
 // ==================== LOGIN ENDPOINTS ====================
 // GET endpoint for testing login (optional - can be removed in production)
-app.get('/api/login', (req, res) => {
+/*app.get('/api/login', (req, res) => {
     res.json({
         success: true,
         message: 'Login endpoint is available',
@@ -727,7 +727,7 @@ app.get('/api/login', (req, res) => {
         note: 'Use POST method for actual login'
     });
 });
-
+*/
 // POST endpoint for actual login
 app.post('/api/login', async (req, res) => {
     try {
