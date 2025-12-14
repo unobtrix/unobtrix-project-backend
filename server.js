@@ -23,7 +23,8 @@ app.use(cors({
         'https://unobtrix.netlify.app/customer.html',
         'http://localhost:3000',
         'http://localhost:5500',
-        'http://127.0.0.1:5500'
+        'http://127.0.0.1:5500',
+        'http://localhost:5000'
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -35,13 +36,13 @@ app.use(cors({
 app.options('*', cors());
 
 // Increase body size limit for image uploads
-app.use(bodyParser.json({ limit: '10mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
 // Enhanced Request logging middleware
 app.use((req, res, next) => {
     console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-    console.log('Headers:', req.headers);
+    console.log('Origin:', req.headers.origin);
     if (req.method === 'POST' && req.body) {
         const bodyCopy = { ...req.body };
         if (bodyCopy.profile_photo_base64) {
@@ -53,8 +54,10 @@ app.use((req, res, next) => {
         if (bodyCopy.password) {
             bodyCopy.password = `[PASSWORD_HIDDEN]`;
         }
+        if (bodyCopy.imageData) {
+            bodyCopy.imageData = `[IMAGE_DATA:${bodyCopy.imageData.length} chars]`;
+        }
         console.log('Body keys:', Object.keys(bodyCopy));
-        console.log('Body values:', bodyCopy);
     }
     next();
 });
@@ -166,13 +169,13 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
         
         if (!base64Image) {
             console.error('❌ No image data provided');
-            return null;
+            return '';
         }
         
         if (!base64Image.startsWith('data:image/')) {
             console.error('❌ Invalid image format. Must be base64 image data.');
             console.error('Received start:', base64Image.substring(0, 100));
-            return null;
+            return '';
         }
 
         const timestamp = Date.now();
@@ -208,7 +211,7 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
                 console.error('Please check RLS policies for storage tables.');
             }
             
-            return null;
+            return '';
         }
 
         console.log('✅ Upload successful!');
@@ -224,7 +227,7 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
 
     } catch (error) {
         console.error('❌ Error uploading to storage:', error);
-        return null;
+        return '';
     }
 }
 
@@ -708,17 +711,12 @@ app.get('/health', async (req, res) => {
         
         res.json({ 
             status: 'healthy',
-            server: 'FarmTrials Registration API v8.3',
+            server: 'FarmTrials Registration API',
             timestamp: new Date().toISOString(),
             supabase: 'Connected',
             storage: 'Supabase Storage ready',
             table_structure: tableStructure,
-            note: 'Consumers ID converted to BIGINT (int8)',
-            id_types: {
-                consumers: tableStructure?.consumers?.idType || 'unknown',
-                farmers: tableStructure?.farmers?.idType || 'unknown'
-            },
-            features: ['registration', 'image-upload', 'otp-verification', 'bigint-ids', 'login'],
+            note: 'Complete registration system with image upload',
             endpoints: {
                 health: 'GET /health',
                 check_structure: 'GET /api/check-structure',
@@ -782,7 +780,8 @@ app.get('/api/login', (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         console.log('🔐 LOGIN REQUEST RECEIVED');
-        console.log('Request body:', req.body);
+        console.log('Request origin:', req.headers.origin);
+        console.log('Request body keys:', Object.keys(req.body));
         
         const { email, password, userType = 'consumer' } = req.body;
         
@@ -816,7 +815,7 @@ app.post('/api/login', async (req, res) => {
             });
         }
         
-        console.log('📊 Found users:', users);
+        console.log('📊 Found users:', users ? users.length : 0);
         
         if (!users || users.length === 0) {
             console.log('❌ User not found:', email);
@@ -855,6 +854,9 @@ app.post('/api/login', async (req, res) => {
         // Remove password from response
         const { password: _, ...safeUser } = user;
         
+        // Generate a simple token
+        const token = Buffer.from(`${Date.now()}:${user.id}`).toString('base64');
+        
         const responseData = {
             success: true,
             message: 'Login successful',
@@ -862,10 +864,11 @@ app.post('/api/login', async (req, res) => {
                 ...safeUser,
                 user_type: userType
             },
+            token: token,
             timestamp: new Date().toISOString()
         };
         
-        console.log('✅ Sending response:', responseData);
+        console.log('✅ Sending response for user:', safeUser.username);
         res.json(responseData);
         
     } catch (error) {
@@ -1766,12 +1769,12 @@ app.get('/api/debug/users', async (req, res) => {
     try {
         const { data: consumers } = await supabase
             .from('consumers')
-            .select('id, username, email, mobile, status')
+            .select('id, username, email, mobile, status, profile_photo_url, created_at')
             .limit(5);
         
         const { data: farmers } = await supabase
             .from('farmers')
-            .select('id, username, email, mobile, farm_name, status')
+            .select('id, username, email, mobile, farm_name, status, account_verified, created_at')
             .limit(5);
         
         // Check ID types
@@ -1806,11 +1809,11 @@ app.get('/', async (req, res) => {
         const structure = await checkTableStructure();
         
         res.json({ 
-            server: 'FarmTrials Registration API',
-            version: '8.3',
+            server: 'FarmTrials Complete Registration API',
+            version: '1.0.0',
             status: 'operational',
             timestamp: new Date().toISOString(),
-            note: 'Fixed login endpoint with enhanced debugging',
+            note: 'Complete registration system with image upload and login',
             table_issues: {
                 consumers_id_type: structure?.consumers?.idType || 'unknown',
                 consumers_id_is_bigint: structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string',
@@ -1828,7 +1831,8 @@ app.get('/', async (req, res) => {
                 security: 'Password hashing with bcrypt',
                 consumer_ids: 'BIGINT (auto-incrementing)',
                 photo_saving: 'Fixed profile_photo_url saving',
-                login: 'Email/password authentication (GET & POST)'
+                login: 'Email/password authentication (GET & POST)',
+                cors: 'Configured for Netlify and localhost'
             },
             endpoints: {
                 health: 'GET /health',
@@ -1843,6 +1847,7 @@ app.get('/', async (req, res) => {
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
                 test_upload: 'POST /api/test-upload',
+                upload_photo: 'POST /api/upload-photo',
                 mobile_otp: {
                     send: 'POST /api/mobile/send-otp',
                     verify: 'POST /api/mobile/verify'
@@ -1876,6 +1881,17 @@ app.use((req, res) => {
         message: 'Endpoint not found',
         path: req.path,
         method: req.method,
+        available_endpoints: [
+            'GET /',
+            'GET /health',
+            'GET /api/login',
+            'POST /api/login',
+            'POST /api/register/consumer',
+            'POST /api/register/farmer',
+            'GET /api/check-structure',
+            'GET /api/check-bucket',
+            'GET /api/debug/users'
+        ],
         timestamp: new Date().toISOString()
     });
 });
@@ -1912,7 +1928,7 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, async () => {
     console.log(`
-    🚀 FarmTrials Backend Server v8.3
+    🚀 FarmTrials Complete Backend Server
     📍 Port: ${PORT}
     🔗 Supabase: Connected
     ⏰ Started: ${new Date().toISOString()}
@@ -1950,7 +1966,7 @@ app.listen(PORT, async () => {
     ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
     🔐 Login System: ✅ Email/password authentication ready (GET & POST)
     🔒 Security: Password hashing with bcrypt
-    🌐 Frontend: https://unobtrix.netlify.app
+    🌐 CORS: Configured for Netlify and localhost
     
     ${!consumersIdOk ? `
     ⚠️ CRITICAL: Consumers table id must be BIGINT (int8)
@@ -1962,17 +1978,23 @@ app.listen(PORT, async () => {
     Visit: GET /api/fix-consumers-columns for SQL commands
     ` : ''}
     
-    ✅ Server is running with enhanced debugging!
+    ✅ Server is running with all functionality!
     
-    📋 Diagnostic endpoints:
+    📋 Available endpoints:
+       GET  /                          - Server info
        GET  /health                    - Health check
+       GET  /api/login                 - Login endpoint info (GET)
+       POST /api/login                 - User login (POST)
+       POST /api/register/consumer     - Register consumer
+       POST /api/register/farmer       - Register farmer
        GET  /api/check-structure       - Check table structure
        GET  /api/fix-consumers-id      - Fix consumers ID type
        GET  /api/fix-consumers-columns - Add missing columns
        GET  /api/check-bucket          - Check bucket status
-       GET  /api/login                 - Login endpoint info (GET)
-       POST /api/login                 - User login (POST)
-       POST /api/register/consumer     - Test registration
        GET  /api/debug/users           - Check existing users
+       POST /api/mobile/send-otp       - Send mobile OTP
+       POST /api/mobile/verify         - Verify mobile OTP
+       POST /api/aadhaar/send-otp      - Send Aadhaar OTP
+       POST /api/aadhaar/verify        - Verify Aadhaar OTP
     `);
 });
