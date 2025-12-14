@@ -38,9 +38,10 @@ app.options('*', cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging middleware
+// Enhanced Request logging middleware
 app.use((req, res, next) => {
     console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+    console.log('Headers:', req.headers);
     if (req.method === 'POST' && req.body) {
         const bodyCopy = { ...req.body };
         if (bodyCopy.profile_photo_base64) {
@@ -49,7 +50,11 @@ app.use((req, res, next) => {
         if (bodyCopy.profile_photo_url) {
             bodyCopy.profile_photo_url = `[URL:${bodyCopy.profile_photo_url.substring(0, 50)}...]`;
         }
+        if (bodyCopy.password) {
+            bodyCopy.password = `[PASSWORD_HIDDEN]`;
+        }
         console.log('Body keys:', Object.keys(bodyCopy));
+        console.log('Body values:', bodyCopy);
     }
     next();
 });
@@ -696,125 +701,6 @@ async function insertFarmer(farmerData) {
     }
 }
 
-// ==================== LOGIN ENDPOINTS ====================
-// GET endpoint for testing login (optional - can be removed in production)
-app.get('/api/login', (req, res) => {
-    res.json({
-        success: true,
-        message: 'Login endpoint is available',
-        instructions: {
-            method: 'POST',
-            required_fields: ['email', 'password'],
-            optional_field: 'userType (default: "consumer")',
-            /*example_request: {
-                email: 'user@example.com',
-                password: 'password123',
-                userType: 'consumer'
-            },
-            example_response: {
-                success: true,
-                message: 'Login successful',
-                user: {
-                    id: 1,
-                    username: 'john_doe',
-                    email: 'user@example.com',
-                    status: 'active',
-                    profile_photo_url: 'https://...',
-                    user_type: 'consumer'
-                }
-            }*/
-        },
-        note: 'Use POST method for actual login'
-    });
-});
-
-// POST endpoint for actual login
-app.post('/api/login', async (req, res) => {
-    try {
-        const { email, password, userType = 'consumer' } = req.body;
-        
-        console.log('🔐 Login attempt for:', email, 'Type:', userType);
-        
-        if (!email || !password) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email and password are required'
-            });
-        }
-        
-        // Determine which table to query
-        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
-        
-        // Find user by email
-        const { data: users, error: findError } = await supabase
-            .from(tableName)
-            .select('id, username, email, password, status, profile_photo_url')
-            .eq('email', email.toLowerCase().trim())
-            .limit(1);
-        
-        if (findError) {
-            console.error('Database error:', findError);
-            return res.status(500).json({
-                success: false,
-                message: 'Login failed'
-            });
-        }
-        
-        if (!users || users.length === 0) {
-            console.log('❌ User not found:', email);
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid email or password'
-            });
-        }
-        
-        const user = users[0];
-        
-        // Verify password using your password hashing utility
-        console.log('🔐 Verifying password...');
-        const isValid = await verifyPassword(password, user.password);
-        
-        if (!isValid) {
-            console.log('❌ Invalid password for:', email);
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid email or password'
-            });
-        }
-        
-        // Check account status
-        if (user.status !== 'active' && user.status !== 'pending_verification') {
-            console.log('⚠️ Account not active:', user.status);
-            return res.status(403).json({
-                success: false,
-                message: `Account is ${user.status}. Please contact support.`
-            });
-        }
-        
-        console.log('✅ Login successful for:', email);
-        
-        // Remove password from response
-        const { password: _, ...safeUser } = user;
-        
-        res.json({
-            success: true,
-            message: 'Login successful',
-            user: {
-                ...safeUser,
-                user_type: userType
-            },
-            timestamp: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ Login error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Login failed. Please try again.'
-        });
-    }
-});
-
 // ==================== HEALTH CHECK ====================
 app.get('/health', async (req, res) => {
     try {
@@ -822,7 +708,7 @@ app.get('/health', async (req, res) => {
         
         res.json({ 
             status: 'healthy',
-            server: 'FarmTrials Registration API v8.2',
+            server: 'FarmTrials Registration API v8.3',
             timestamp: new Date().toISOString(),
             supabase: 'Connected',
             storage: 'Supabase Storage ready',
@@ -855,6 +741,139 @@ app.get('/health', async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Health check failed',
+            error: error.message
+        });
+    }
+});
+
+// ==================== LOGIN ENDPOINTS ====================
+// GET endpoint for testing login
+app.get('/api/login', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Login endpoint is available',
+        instructions: {
+            method: 'POST',
+            required_fields: ['email', 'password'],
+            optional_field: 'userType (default: "consumer")',
+            example_request: {
+                email: 'user@example.com',
+                password: 'password123',
+                userType: 'consumer'
+            },
+            example_response: {
+                success: true,
+                message: 'Login successful',
+                user: {
+                    id: 1,
+                    username: 'john_doe',
+                    email: 'user@example.com',
+                    status: 'active',
+                    profile_photo_url: 'https://...',
+                    user_type: 'consumer'
+                }
+            }
+        },
+        note: 'Use POST method for actual login'
+    });
+});
+
+// POST endpoint for actual login
+app.post('/api/login', async (req, res) => {
+    try {
+        console.log('🔐 LOGIN REQUEST RECEIVED');
+        console.log('Request body:', req.body);
+        
+        const { email, password, userType = 'consumer' } = req.body;
+        
+        console.log('🔐 Login attempt for:', email, 'Type:', userType);
+        
+        if (!email || !password) {
+            console.log('❌ Missing email or password');
+            return res.status(400).json({
+                success: false,
+                message: 'Email and password are required'
+            });
+        }
+        
+        // Determine which table to query
+        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
+        console.log('📊 Querying table:', tableName);
+        
+        // Find user by email
+        const { data: users, error: findError } = await supabase
+            .from(tableName)
+            .select('id, username, email, password, status, profile_photo_url')
+            .eq('email', email.toLowerCase().trim())
+            .limit(1);
+        
+        if (findError) {
+            console.error('❌ Database error:', findError);
+            return res.status(500).json({
+                success: false,
+                message: 'Login failed due to database error',
+                error: findError.message
+            });
+        }
+        
+        console.log('📊 Found users:', users);
+        
+        if (!users || users.length === 0) {
+            console.log('❌ User not found:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+        
+        const user = users[0];
+        console.log('👤 User found:', user.username, 'ID:', user.id);
+        
+        // Verify password using your password hashing utility
+        console.log('🔐 Verifying password...');
+        const isValid = await verifyPassword(password, user.password);
+        
+        if (!isValid) {
+            console.log('❌ Invalid password for:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+        
+        // Check account status
+        if (user.status !== 'active' && user.status !== 'pending_verification') {
+            console.log('⚠️ Account not active:', user.status);
+            return res.status(403).json({
+                success: false,
+                message: `Account is ${user.status}. Please contact support.`
+            });
+        }
+        
+        console.log('✅ Login successful for:', email);
+        
+        // Remove password from response
+        const { password: _, ...safeUser } = user;
+        
+        const responseData = {
+            success: true,
+            message: 'Login successful',
+            user: {
+                ...safeUser,
+                user_type: userType
+            },
+            timestamp: new Date().toISOString()
+        };
+        
+        console.log('✅ Sending response:', responseData);
+        res.json(responseData);
+        
+    } catch (error) {
+        console.error('❌ Login error:', error);
+        console.error('Error stack:', error.stack);
+        res.status(500).json({
+            success: false,
+            message: 'Login failed. Please try again.',
             error: error.message
         });
     }
@@ -1418,7 +1437,6 @@ app.post('/api/test-upload', async (req, res) => {
 });
 
 // ==================== REGISTRATION ENDPOINTS ====================
-// ==================== UPDATED CONSUMER REGISTRATION ENDPOINT ====================
 app.post('/api/register/consumer', async (req, res) => {
     try {
         const { username, email, mobile, password, profile_photo_base64, profile_photo_url } = req.body;
@@ -1783,18 +1801,16 @@ app.get('/api/debug/users', async (req, res) => {
 });
 
 // ==================== ROOT ENDPOINT ====================
-// ==================== ADD TO ROOT ENDPOINT ====================
-// In the root endpoint (/), add the new endpoint:
 app.get('/', async (req, res) => {
     try {
         const structure = await checkTableStructure();
         
         res.json({ 
             server: 'FarmTrials Registration API',
-            version: '8.2',
+            version: '8.3',
             status: 'operational',
             timestamp: new Date().toISOString(),
-            note: 'Fixed profile_photo_url saving issue',
+            note: 'Fixed login endpoint with enhanced debugging',
             table_issues: {
                 consumers_id_type: structure?.consumers?.idType || 'unknown',
                 consumers_id_is_bigint: structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string',
@@ -1894,10 +1910,9 @@ setInterval(() => {
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
 
-// ==================== UPDATED SERVER START MESSAGE ====================
 app.listen(PORT, async () => {
     console.log(`
-    🚀 FarmTrials Backend Server v8.2
+    🚀 FarmTrials Backend Server v8.3
     📍 Port: ${PORT}
     🔗 Supabase: Connected
     ⏰ Started: ${new Date().toISOString()}
@@ -1947,7 +1962,7 @@ app.listen(PORT, async () => {
     Visit: GET /api/fix-consumers-columns for SQL commands
     ` : ''}
     
-    ✅ Server is running with enhanced photo saving!
+    ✅ Server is running with enhanced debugging!
     
     📋 Diagnostic endpoints:
        GET  /health                    - Health check
