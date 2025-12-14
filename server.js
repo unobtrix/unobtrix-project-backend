@@ -1783,7 +1783,91 @@ app.listen(PORT, async () => {
         console.log('6. Create bucket');
         console.log('\n⚠️ Without bucket, photo uploads will fail but registration will still work.');
     }
-    
+    app.post('/api/login', async (req, res) => {
+    try {
+        const { email, password, userType = 'consumer' } = req.body;
+        
+        console.log('🔐 Login attempt for:', email, 'Type:', userType);
+        
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email and password are required'
+            });
+        }
+        
+        // Determine which table to query
+        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
+        
+        // Find user by email
+        const { data: users, error: findError } = await supabase
+            .from(tableName)
+            .select('id, username, email, password, status, profile_photo_url')
+            .eq('email', email.toLowerCase().trim())
+            .limit(1);
+        
+        if (findError) {
+            console.error('Database error:', findError);
+            return res.status(500).json({
+                success: false,
+                message: 'Login failed'
+            });
+        }
+        
+        if (!users || users.length === 0) {
+            console.log('❌ User not found:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+        
+        const user = users[0];
+        
+        // Verify password using your password hashing utility
+        console.log('🔐 Verifying password...');
+        const isValid = await verifyPassword(password, user.password);
+        
+        if (!isValid) {
+            console.log('❌ Invalid password for:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+        
+        // Check account status
+        if (user.status !== 'active' && user.status !== 'pending_verification') {
+            console.log('⚠️ Account not active:', user.status);
+            return res.status(403).json({
+                success: false,
+                message: `Account is ${user.status}. Please contact support.`
+            });
+        }
+        
+        console.log('✅ Login successful for:', email);
+        
+        // Remove password from response
+        const { password: _, ...safeUser } = user;
+        
+        res.json({
+            success: true,
+            message: 'Login successful',
+            user: {
+                ...safeUser,
+                user_type: userType
+            },
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ Login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Login failed. Please try again.'
+        });
+    }
+});
     console.log('\n🔍 Checking table structure...');
     const structure = await checkTableStructure();
     const consumersFix = await addMissingColumnToConsumers();
