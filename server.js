@@ -696,7 +696,39 @@ async function insertFarmer(farmerData) {
     }
 }
 
-// ==================== LOGIN ENDPOINT ====================
+// ==================== LOGIN ENDPOINTS ====================
+// GET endpoint for testing login (optional - can be removed in production)
+app.get('/api/login', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Login endpoint is available',
+        instructions: {
+            method: 'POST',
+            required_fields: ['email', 'password'],
+            optional_field: 'userType (default: "consumer")',
+            example_request: {
+                email: 'user@example.com',
+                password: 'password123',
+                userType: 'consumer'
+            },
+            example_response: {
+                success: true,
+                message: 'Login successful',
+                user: {
+                    id: 1,
+                    username: 'john_doe',
+                    email: 'user@example.com',
+                    status: 'active',
+                    profile_photo_url: 'https://...',
+                    user_type: 'consumer'
+                }
+            }
+        },
+        note: 'Use POST method for actual login'
+    });
+});
+
+// POST endpoint for actual login
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password, userType = 'consumer' } = req.body;
@@ -790,7 +822,7 @@ app.get('/health', async (req, res) => {
         
         res.json({ 
             status: 'healthy',
-            server: 'FarmTrials Registration API v8.0',
+            server: 'FarmTrials Registration API v8.2',
             timestamp: new Date().toISOString(),
             supabase: 'Connected',
             storage: 'Supabase Storage ready',
@@ -804,7 +836,10 @@ app.get('/health', async (req, res) => {
             endpoints: {
                 health: 'GET /health',
                 check_structure: 'GET /api/check-structure',
-                login: 'POST /api/login',
+                login: {
+                    get: 'GET /api/login (for testing)',
+                    post: 'POST /api/login (for actual login)'
+                },
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
                 mobile_otp: 'POST /api/mobile/send-otp',
@@ -1756,7 +1791,7 @@ app.get('/', async (req, res) => {
         
         res.json({ 
             server: 'FarmTrials Registration API',
-            version: '8.1',
+            version: '8.2',
             status: 'operational',
             timestamp: new Date().toISOString(),
             note: 'Fixed profile_photo_url saving issue',
@@ -1777,7 +1812,7 @@ app.get('/', async (req, res) => {
                 security: 'Password hashing with bcrypt',
                 consumer_ids: 'BIGINT (auto-incrementing)',
                 photo_saving: 'Fixed profile_photo_url saving',
-                login: 'Email/password authentication'
+                login: 'Email/password authentication (GET & POST)'
             },
             endpoints: {
                 health: 'GET /health',
@@ -1785,7 +1820,10 @@ app.get('/', async (req, res) => {
                 fix_consumers_id: 'GET /api/fix-consumers-id',
                 fix_consumers_columns: 'GET /api/fix-consumers-columns',
                 check_bucket: 'GET /api/check-bucket',
-                login: 'POST /api/login',
+                login: {
+                    get: 'GET /api/login (for testing)',
+                    post: 'POST /api/login (for actual login)'
+                },
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
                 test_upload: 'POST /api/test-upload',
@@ -1859,7 +1897,7 @@ const PORT = process.env.PORT || 5000;
 // ==================== UPDATED SERVER START MESSAGE ====================
 app.listen(PORT, async () => {
     console.log(`
-    🚀 FarmTrials Backend Server v8.1
+    🚀 FarmTrials Backend Server v8.2
     📍 Port: ${PORT}
     🔗 Supabase: Connected
     ⏰ Started: ${new Date().toISOString()}
@@ -1895,7 +1933,7 @@ app.listen(PORT, async () => {
     📸 Profile Photo Column: ${consumersHasPhotoColumn ? '✅ Exists' : '❌ MISSING - photos won\'t save!'}
     🕒 Timestamps: ${structure?.farmers?.hasCreatedAt ? '✅ created_at exists' : '❌ created_at missing'}
     ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
-    🔐 Login System: ✅ Email/password authentication ready
+    🔐 Login System: ✅ Email/password authentication ready (GET & POST)
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
@@ -1917,7 +1955,8 @@ app.listen(PORT, async () => {
        GET  /api/fix-consumers-id      - Fix consumers ID type
        GET  /api/fix-consumers-columns - Add missing columns
        GET  /api/check-bucket          - Check bucket status
-       POST /api/login                 - User login endpoint
+       GET  /api/login                 - Login endpoint info (GET)
+       POST /api/login                 - User login (POST)
        POST /api/register/consumer     - Test registration
        GET  /api/debug/users           - Check existing users
     `);
