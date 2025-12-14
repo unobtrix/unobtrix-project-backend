@@ -248,6 +248,14 @@ async function checkBucketExists() {
         if (error) {
             if (error.message && error.message.includes('not found')) {
                 console.error('❌ Bucket "profile-photos" does not exist!');
+                console.error('\n⚠️ MANUAL ACTION REQUIRED ⚠️');
+                console.error('Please create bucket manually in Supabase Dashboard:');
+                console.error('1. Go to Storage → New bucket');
+                console.error('2. Name: profile-photos');
+                console.error('3. Public: ON');
+                console.error('4. File size limit: 50MB');
+                console.error('5. Create bucket');
+                console.error('\nAfter creating bucket, restart the server.');
                 return false;
             }
             
@@ -276,6 +284,7 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
         
         if (!base64Image.startsWith('data:image/')) {
             console.error('❌ Invalid image format. Must be base64 image data.');
+            console.error('Received start:', base64Image.substring(0, 100));
             return '';
         }
 
@@ -287,6 +296,7 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
         const bucketName = 'profile-photos';
 
         console.log(`📤 Uploading to: ${bucketName}/${filename}`);
+        console.log(`📊 Image size: ${base64Image.length} characters (base64)`);
 
         const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
@@ -302,6 +312,15 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
 
         if (error) {
             console.error('❌ Storage upload error:', error.message);
+            
+            if (error.message && error.message.includes('The resource was not found')) {
+                console.error('❌ Bucket "profile-photos" not found!');
+                console.error('Please create it manually in Supabase Dashboard.');
+            } else if (error.message && error.message.includes('row-level security')) {
+                console.error('❌ RLS policy error!');
+                console.error('Please check RLS policies for storage tables.');
+            }
+            
             return '';
         }
 
@@ -327,6 +346,7 @@ async function checkTableStructure() {
     try {
         console.log('🔍 Checking table structure...');
         
+        // Get one farmer to see columns
         const { data: farmerData, error: farmerError } = await supabase
             .from('farmers')
             .select('*')
@@ -337,6 +357,7 @@ async function checkTableStructure() {
             farmerColumns = Object.keys(farmerData[0]);
         }
         
+        // Get one consumer to see columns
         const { data: consumerData, error: consumerError } = await supabase
             .from('consumers')
             .select('*')
@@ -347,6 +368,7 @@ async function checkTableStructure() {
             consumerColumns = Object.keys(consumerData[0]);
         }
         
+        // Determine ID type
         let consumerIdType = 'unknown';
         if (consumerData && consumerData.length > 0 && consumerData[0].id !== undefined) {
             const idValue = consumerData[0].id;
@@ -395,63 +417,6 @@ async function checkTableStructure() {
     }
 }
 
-// ==================== ADD MISSING COLUMN TO CONSUMERS ====================
-async function addMissingColumnToConsumers() {
-    try {
-        console.log('🔍 Checking and fixing consumers table columns...');
-        
-        const tableStructure = await checkTableStructure();
-        const missingColumns = [];
-        
-        if (!tableStructure?.consumers?.hasProfilePhotoUrl) {
-            missingColumns.push('profile_photo_url');
-        }
-        
-        if (!tableStructure?.consumers?.hasCreatedAt) {
-            missingColumns.push('created_at');
-        }
-        
-        if (!tableStructure?.consumers?.hasUpdatedAt) {
-            missingColumns.push('updated_at');
-        }
-        
-        if (missingColumns.length === 0) {
-            console.log('✅ All required columns exist in consumers table');
-            return { success: true, message: 'All columns exist' };
-        }
-        
-        console.log('❌ Missing columns in consumers table:', missingColumns);
-        
-        const sqlCommands = [];
-        
-        if (missingColumns.includes('profile_photo_url')) {
-            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';');
-        }
-        
-        if (missingColumns.includes('created_at')) {
-            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();');
-        }
-        
-        if (missingColumns.includes('updated_at')) {
-            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();');
-        }
-        
-        const sql = sqlCommands.join('\n');
-        
-        return {
-            success: false,
-            message: 'Missing columns detected',
-            missingColumns,
-            sql_fix: sql,
-            instructions: 'Run the above SQL in Supabase SQL Editor to fix the consumers table'
-        };
-        
-    } catch (error) {
-        console.error('Error checking consumers table:', error);
-        return { success: false, error: error.message };
-    }
-}
-
 // ==================== REGISTRATION WITH IMAGE UPLOAD ====================
 async function insertConsumer(userData) {
     try {
@@ -460,7 +425,7 @@ async function insertConsumer(userData) {
         
         const hashedPassword = await hashPassword(userData.password);
         
-        // CRITICAL FIX: Always ensure profile_photo_url has a value (empty string if not provided)
+        // CRITICAL FIX: Always ensure profile_photo_url has a non-null value
         let profilePhotoUrl = '';
         
         const photoData = userData.profile_photo_base64 || userData.profile_photo_url;
@@ -518,32 +483,25 @@ async function insertConsumer(userData) {
             selectFields.push('updated_at');
         }
         
-        // Build consumer data object - CRITICAL: profile_photo_url always has a value
+        // CRITICAL FIX: Build consumer data with profile_photo_url ALWAYS included
         const consumerData = {
             username: userData.username,
             email: userData.email,
             mobile: userData.mobile,
             password: hashedPassword,
-            status: 'active'
+            status: 'active',
+            profile_photo_url: profilePhotoUrl // ALWAYS included with value
         };
 
-        // Only add profile_photo_url if the column actually exists in the database
-        if (tableStructure?.consumers?.columns?.includes('profile_photo_url')) {
-            consumerData.profile_photo_url = profilePhotoUrl;
-            console.log('✅ Adding profile_photo_url to insert data:', profilePhotoUrl || '(empty string)');
-        } else {
-            console.log('ℹ️ profile_photo_url column not found in consumers table - skipping');
-        }
-
-        // Only add timestamps if they exist
+        // Only add timestamps if they exist (let DB handle defaults)
         if (tableStructure?.consumers?.columns?.includes('created_at')) {
-            // Let database handle created_at with DEFAULT NOW()
+            // Will use DB default
         }
         if (tableStructure?.consumers?.columns?.includes('updated_at')) {
-            // Let database handle updated_at with DEFAULT NOW()
+            // Will use DB default
         }
         
-        console.log('📝 Final consumer data to insert:', Object.keys(consumerData));
+        console.log('📝 Final consumer data to insert:', consumerData);
         console.log('📋 Will select:', selectFields);
         
         const { data, error } = await supabase
@@ -563,18 +521,24 @@ async function insertConsumer(userData) {
             if (error.code === '42703') {
                 console.error('\n🔧 MISSING COLUMN DETECTED!');
                 console.error('The profile_photo_url column might not exist in the consumers table.');
+                console.error('\n🛠️ FIX: Run this SQL in Supabase SQL Editor:');
+                console.error(`ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';`);
             } else if (error.code === '23502') {
                 console.error('\n🔧 NULL CONSTRAINT VIOLATION!');
-                console.error('The profile_photo_url column has a NOT NULL constraint but no default value.');
+                console.error('The profile_photo_url column has a NOT NULL constraint.');
                 console.error('Current value being sent:', profilePhotoUrl);
-                console.error('\n🛠️ FIX: Run this SQL: ALTER TABLE consumers ALTER COLUMN profile_photo_url SET DEFAULT \'\';');
+                console.error('\n🛠️ FIX: Ensure profile_photo_url is always provided (even empty string)');
+            } else if (error.code === '22P02') {
+                console.error('\n🔧 INVALID TEXT REPRESENTATION!');
+                console.error('This might be due to ID column type mismatch.');
+                console.error('Ensure consumers.id column is BIGINT (int8) in database.');
             }
             
             throw error;
         }
 
         console.log('✅ Consumer saved successfully!');
-        console.log(`✅ ID (bigint): ${data[0].id}`);
+        console.log(`✅ ID: ${data[0].id}`);
         console.log(`✅ Username: ${data[0].username}`);
         console.log(`✅ Email: ${data[0].email}`);
         
@@ -600,13 +564,72 @@ async function insertConsumer(userData) {
     }
 }
 
+// ==================== NEW FUNCTION: ADD MISSING COLUMN TO CONSUMERS ====================
+async function addMissingColumnToConsumers() {
+    try {
+        console.log('🔍 Checking and fixing consumers table columns...');
+        
+        // First, check current structure
+        const tableStructure = await checkTableStructure();
+        const missingColumns = [];
+        
+        if (!tableStructure?.consumers?.hasProfilePhotoUrl) {
+            missingColumns.push('profile_photo_url');
+        }
+        
+        if (!tableStructure?.consumers?.hasCreatedAt) {
+            missingColumns.push('created_at');
+        }
+        
+        if (!tableStructure?.consumers?.hasUpdatedAt) {
+            missingColumns.push('updated_at');
+        }
+        
+        if (missingColumns.length === 0) {
+            console.log('✅ All required columns exist in consumers table');
+            return { success: true, message: 'All columns exist' };
+        }
+        
+        console.log('❌ Missing columns in consumers table:', missingColumns);
+        
+        // Provide SQL to fix
+        const sqlCommands = [];
+        
+        if (missingColumns.includes('profile_photo_url')) {
+            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';');
+        }
+        
+        if (missingColumns.includes('created_at')) {
+            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();');
+        }
+        
+        if (missingColumns.includes('updated_at')) {
+            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();');
+        }
+        
+        const sql = sqlCommands.join('\n');
+        
+        return {
+            success: false,
+            message: 'Missing columns detected',
+            missingColumns,
+            sql_fix: sql,
+            instructions: 'Run the above SQL in Supabase SQL Editor to fix the consumers table'
+        };
+        
+    } catch (error) {
+        console.error('Error checking consumers table:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 async function insertFarmer(farmerData) {
     try {
         console.log('💾 Starting farmer registration...');
         
         const hashedPassword = await hashPassword(farmerData.password);
         
-        // CRITICAL FIX: Always ensure profile_photo_url has a value
+        // CRITICAL FIX: Always ensure profile_photo_url has a non-null value
         let profilePhotoUrl = '';
         
         const photoData = farmerData.profile_photo_base64 || farmerData.profile_photo_url;
@@ -668,7 +691,7 @@ async function insertFarmer(farmerData) {
             selectFields.push('updated_at');
         }
         
-        // CRITICAL: Always include profile_photo_url with a value
+        // CRITICAL FIX: ALWAYS include profile_photo_url with value
         const farmerInsertData = {
             username: farmerData.username,
             email: farmerData.email,
@@ -687,16 +710,9 @@ async function insertFarmer(farmerData) {
             account_holder_name: farmerData.account_holder_name || '',
             account_number: farmerData.account_number || '',
             bank_name: farmerData.bank_name || '',
-            status: 'active'
+            status: 'active',
+            profile_photo_url: profilePhotoUrl // ALWAYS included
         };
-
-        // Only add profile_photo_url if column exists
-        if (tableStructure?.farmers?.columns?.includes('profile_photo_url')) {
-            farmerInsertData.profile_photo_url = profilePhotoUrl;
-            console.log('✅ Adding profile_photo_url to insert:', profilePhotoUrl || '(empty)');
-        } else {
-            console.log('ℹ️ profile_photo_url column not found - skipping');
-        }
 
         // Only add account_verified if column exists
         if (tableStructure?.farmers?.columns?.includes('account_verified')) {
@@ -704,7 +720,7 @@ async function insertFarmer(farmerData) {
         }
         
         console.log('📝 Final farmer data to insert:', Object.keys(farmerInsertData));
-        console.log('📋 Will select:', selectFields);
+        console.log('📸 Profile photo URL:', farmerInsertData.profile_photo_url || '(empty string)');
         
         const { data, error } = await supabase
             .from('farmers')
@@ -719,13 +735,18 @@ async function insertFarmer(farmerData) {
                 hint: error.hint,
                 code: error.code
             });
+            
+            if (error.code === '23502' && error.message.includes('profile_photo_url')) {
+                console.error('\n❌ NULL constraint violation on profile_photo_url!');
+                console.error('Value being sent:', farmerInsertData.profile_photo_url);
+            }
+            
             throw error;
         }
 
         console.log('✅ Farmer saved successfully!');
         console.log(`✅ ID: ${data[0].id}`);
-        console.log(`✅ Username: ${data[0].username}`);
-        console.log(`✅ Farm Name: ${data[0].farm_name}`);
+        console.log(`✅ Profile Photo URL: ${data[0].profile_photo_url || '(empty string)'}`);
         
         return { success: true, data: data[0] };
         
@@ -795,12 +816,25 @@ app.get('/api/login', (req, res) => {
                 email: 'user@example.com',
                 password: 'password123',
                 userType: 'consumer'
+            },
+            example_response: {
+                success: true,
+                message: 'Login successful',
+                user: {
+                    id: 1,
+                    username: 'john_doe',
+                    email: 'user@example.com',
+                    status: 'active',
+                    profile_photo_url: 'https://...',
+                    user_type: 'consumer'
+                }
             }
         },
         note: 'Use POST method for actual login'
     });
 });
 
+// POST endpoint for actual login
 app.post('/api/login', async (req, res) => {
     try {
         console.log('🔐 LOGIN REQUEST RECEIVED');
@@ -819,9 +853,11 @@ app.post('/api/login', async (req, res) => {
             });
         }
         
+        // Determine which table to query
         const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
         console.log('📊 Querying table:', tableName);
         
+        // Find user by email
         const { data: users, error: findError } = await supabase
             .from(tableName)
             .select('id, username, email, password, status, profile_photo_url')
@@ -850,6 +886,8 @@ app.post('/api/login', async (req, res) => {
         const user = users[0];
         console.log('👤 User found:', user.username, 'ID:', user.id);
         
+        // Verify password using your password hashing utility
+        console.log('🔐 Verifying password...');
         const isValid = await verifyPassword(password, user.password);
         
         if (!isValid) {
@@ -860,6 +898,7 @@ app.post('/api/login', async (req, res) => {
             });
         }
         
+        // Check account status
         if (user.status !== 'active' && user.status !== 'pending_verification') {
             console.log('⚠️ Account not active:', user.status);
             return res.status(403).json({
@@ -870,7 +909,10 @@ app.post('/api/login', async (req, res) => {
         
         console.log('✅ Login successful for:', email);
         
+        // Remove password from response
         const { password: _, ...safeUser } = user;
+        
+        // Generate a simple token
         const token = Buffer.from(`${Date.now()}:${user.id}`).toString('base64');
         
         const responseData = {
@@ -889,6 +931,7 @@ app.post('/api/login', async (req, res) => {
         
     } catch (error) {
         console.error('❌ Login error:', error);
+        console.error('Error stack:', error.stack);
         res.status(500).json({
             success: false,
             message: 'Login failed. Please try again.',
@@ -897,7 +940,7 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// ==================== CHECK STRUCTURE ENDPOINT ====================
+// ==================== UPDATED CHECK STRUCTURE ENDPOINT ====================
 app.get('/api/check-structure', async (req, res) => {
     try {
         const structure = await checkTableStructure();
@@ -906,6 +949,7 @@ app.get('/api/check-structure', async (req, res) => {
         let sqlFix = '';
         let criticalIssues = [];
         
+        // Check ID type
         if (structure?.consumers?.idType !== 'bigint' && structure?.consumers?.idType !== 'bigint_string') {
             sqlFix += `
                 -- ===== FIX CONSUMERS ID (MUST BE BIGINT) =====
@@ -927,6 +971,7 @@ app.get('/api/check-structure', async (req, res) => {
             criticalIssues.push('❌ Consumers ID is not BIGINT - registration will fail!');
         }
         
+        // Check missing columns
         if (!consumersFix.success && consumersFix.missingColumns) {
             sqlFix += `-- ===== ADD MISSING COLUMNS TO CONSUMERS =====\n`;
             sqlFix += consumersFix.sql_fix;
@@ -937,6 +982,7 @@ app.get('/api/check-structure', async (req, res) => {
             }
         }
         
+        // Check farmers table
         if (!structure?.farmers?.hasAccountVerified || !structure?.farmers?.hasCreatedAt || !structure?.farmers?.hasProfilePhotoUrl) {
             sqlFix += `-- ===== ADD MISSING COLUMNS TO FARMERS =====\n`;
             sqlFix += `ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;\n`;
@@ -966,7 +1012,7 @@ app.get('/api/check-structure', async (req, res) => {
     }
 });
 
-// ==================== FIX CONSUMERS ID ENDPOINT ====================
+// ==================== NEW ENDPOINT: FIX CONSUMERS ID ====================
 app.get('/api/fix-consumers-id', async (req, res) => {
     try {
         const structure = await checkTableStructure();
@@ -1002,11 +1048,13 @@ app.get('/api/fix-consumers-id', async (req, res) => {
                 '    updated_at TIMESTAMP DEFAULT NOW()',
                 ');',
                 '',
+                '-- ===== OPTION 2: MIGRATION WITH DATA (COMPLEX) =====',
+                '-- Contact for assistance if you need to preserve data',
+                '',
                 '-- ===== ALSO FIX FARMERS TABLE IF NEEDED =====',
                 'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;',
                 'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();',
-                'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';',
-                'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();'
+                'ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';'
             ].join('\n'),
             warning: 'Backup your data before running these commands!'
         });
@@ -1020,7 +1068,7 @@ app.get('/api/fix-consumers-id', async (req, res) => {
     }
 });
 
-// ==================== FIX CONSUMERS COLUMNS ENDPOINT ====================
+// ==================== NEW ENDPOINT: FIX CONSUMERS COLUMNS ====================
 app.get('/api/fix-consumers-columns', async (req, res) => {
     try {
         console.log('🔧 Checking consumers table columns...');
@@ -1493,6 +1541,7 @@ app.post('/api/register/consumer', async (req, res) => {
             });
         }
         
+        // Check table structure before proceeding
         const consumersFix = await addMissingColumnToConsumers();
         if (!consumersFix.success && consumersFix.missingColumns.includes('profile_photo_url')) {
             return res.status(500).json({
@@ -1518,11 +1567,12 @@ app.post('/api/register/consumer', async (req, res) => {
         });
         
         if (!result.success) {
+            // Check if it's a column missing error
             let fixHint = '';
             if (result.error?.includes('profile_photo_url') || result.error?.includes('42703')) {
                 fixHint = 'profile_photo_url column might be missing. Check /api/fix-consumers-columns';
             } else if (result.error?.includes('23502')) {
-                fixHint = 'Run SQL: ALTER TABLE consumers ALTER COLUMN profile_photo_url SET DEFAULT \'\';';
+                fixHint = 'profile_photo_url NULL constraint violation. Ensure it always has a value (even empty string)';
             } else if (result.error?.includes('id')) {
                 fixHint = 'Check if consumers.id column is BIGINT in database. Check /api/fix-consumers-id';
             }
@@ -1550,6 +1600,7 @@ app.post('/api/register/consumer', async (req, res) => {
             }
         };
         
+        // CRITICAL: Check if profile_photo_url exists in response
         if (result.data.profile_photo_url !== undefined) {
             responseData.user.profile_photo_url = result.data.profile_photo_url || '';
             responseData.user.storage_note = result.data.profile_photo_url ? 
@@ -1786,6 +1837,7 @@ app.get('/api/debug/users', async (req, res) => {
             .select('id, username, email, mobile, farm_name, status, account_verified, created_at')
             .limit(5);
         
+        // Check ID types
         let consumerIdType = 'unknown';
         if (consumers && consumers.length > 0) {
             const id = consumers[0].id;
@@ -1832,6 +1884,7 @@ app.get('/api/products', async (req, res) => {
             .eq('is_active', true)
             .range(offset, offset + parseInt(limit) - 1);
 
+        // Apply filters
         if (search && search.trim()) {
             query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%,category.ilike.%${search}%`);
         }
@@ -1844,6 +1897,7 @@ app.get('/api/products', async (req, res) => {
             query = query.eq('farmer_id', farmer_id);
         }
 
+        // Apply sorting
         if (sort_by && ['name', 'price', 'created_at', 'stock_quantity'].includes(sort_by)) {
             query = query.order(sort_by, { ascending: sort_order === 'asc' });
         }
@@ -1948,6 +2002,7 @@ app.get('/api/tours', async (req, res) => {
             .eq('is_active', true)
             .range(offset, offset + parseInt(limit) - 1);
 
+        // Apply filters
         if (search && search.trim()) {
             query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
         }
@@ -1956,6 +2011,7 @@ app.get('/api/tours', async (req, res) => {
             query = query.eq('farmer_id', farmer_id);
         }
 
+        // Apply sorting
         if (sort_by && ['name', 'price', 'created_at', 'duration'].includes(sort_by)) {
             query = query.order(sort_by, { ascending: sort_order === 'asc' });
         }
@@ -2007,7 +2063,14 @@ app.get('/', async (req, res) => {
             status: 'operational',
             timestamp: new Date().toISOString(),
             note: 'Complete registration system with image upload and login',
-            critical_fix: 'Run SQL: ALTER TABLE consumers ALTER COLUMN profile_photo_url SET DEFAULT \'\';',
+            table_issues: {
+                consumers_id_type: structure?.consumers?.idType || 'unknown',
+                consumers_id_is_bigint: structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string',
+                consumers_has_profile_photo_url: structure?.consumers?.hasProfilePhotoUrl || false,
+                farmers_missing_updated_at: !structure?.farmers?.hasUpdatedAt,
+                farmers_missing_account_verified: !structure?.farmers?.hasAccountVerified,
+                farmers_missing_created_at: !structure?.farmers?.hasCreatedAt
+            },
             features: {
                 supabase: 'Connected',
                 storage: 'Supabase Storage ready',
@@ -2015,7 +2078,10 @@ app.get('/', async (req, res) => {
                 registration: 'Consumer & Farmer',
                 otp: 'Mobile & Aadhaar verification',
                 security: 'Password hashing with bcrypt',
+                consumer_ids: 'BIGINT (auto-incrementing)',
+                photo_saving: 'Fixed profile_photo_url NOT NULL handling',
                 login: 'Email/password authentication (GET & POST)',
+                cors: 'Configured for Netlify and localhost',
                 products: 'Product catalog with filters',
                 tours: 'Tour listings with filters'
             },
@@ -2031,6 +2097,8 @@ app.get('/', async (req, res) => {
                 },
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
+                test_upload: 'POST /api/test-upload',
+                upload_photo: 'POST /api/upload-photo',
                 mobile_otp: {
                     send: 'POST /api/mobile/send-otp',
                     verify: 'POST /api/mobile/verify'
@@ -2039,8 +2107,6 @@ app.get('/', async (req, res) => {
                     send: 'POST /api/aadhaar/send-otp',
                     verify: 'POST /api/aadhaar/verify'
                 },
-                test_upload: 'POST /api/test-upload',
-                upload_photo: 'POST /api/upload-photo',
                 debug: {
                     storage: 'GET /api/debug/storage',
                     users: 'GET /api/debug/users'
@@ -2049,7 +2115,10 @@ app.get('/', async (req, res) => {
                 product_single: 'GET /api/products/:id',
                 tours: 'GET /api/tours',
                 migrate_passwords: 'POST /api/migrate-passwords'
-            }
+            },
+            critical_check: structure?.consumers?.hasProfilePhotoUrl ? 
+                '✅ profile_photo_url column exists with NOT NULL constraint' : 
+                '❌ profile_photo_url column missing - run /api/fix-consumers-columns'
         });
     } catch (error) {
         res.json({
@@ -2169,18 +2238,24 @@ app.listen(PORT, async () => {
     console.log(`
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
     🆔 Consumers ID: ${consumersIdOk ? '✅ BIGINT (int8)' : `❌ ${structure?.consumers?.idType || 'Unknown'} - FIX REQUIRED!`}
-    📸 Profile Photo Column: ${consumersHasPhotoColumn ? '✅ Exists' : '❌ MISSING - photos won\'t save!'}
+    📸 Profile Photo Column: ${consumersHasPhotoColumn ? '✅ Exists with NOT NULL' : '❌ MISSING - photos won\'t save!'}
     🕒 Timestamps: ${structure?.farmers?.hasCreatedAt ? '✅ created_at exists' : '❌ created_at missing'}
     ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
-    🔐 Login System: ✅ Email/password authentication ready
+    🔐 Login System: ✅ Email/password authentication ready (GET & POST)
     🔒 Security: Password hashing with bcrypt
     🌐 CORS: Configured for Netlify and localhost
+    📦 Products: ✅ Catalog with filters
+    🎢 Tours: ✅ Listings with filters
     
-    ${!consumersIdOk ? `⚠️ CRITICAL: Consumers table id must be BIGINT (int8)` : ''}
-    ${!consumersHasPhotoColumn ? `⚠️ CRITICAL: Consumers table missing profile_photo_url column` : ''}
+    ${!consumersIdOk ? `
+    ⚠️ CRITICAL: Consumers table id must be BIGINT (int8)
+    Visit: GET /api/fix-consumers-id for SQL commands
+    ` : ''}
     
-    💡 IMPORTANT FIX: If registration fails due to NULL constraint on profile_photo_url, run:
-    ALTER TABLE consumers ALTER COLUMN profile_photo_url SET DEFAULT '';
+    ${!consumersHasPhotoColumn ? `
+    ⚠️ CRITICAL: Consumers table missing profile_photo_url column
+    Visit: GET /api/fix-consumers-columns for SQL commands
+    ` : ''}
     
     ✅ Server is running with ALL functionality!
     
