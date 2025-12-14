@@ -466,26 +466,28 @@ async function insertConsumer(userData) {
         const tableStructure = await checkTableStructure();
         console.log('🔍 Consumers table structure:', tableStructure?.consumers);
         
-        // Always include profile_photo_url in select and insert
+        // Build select fields based on what actually exists in the database
         const selectFields = ['id', 'username', 'email', 'mobile', 'status'];
-        
-        // CRITICAL: Always include profile_photo_url if column exists
-        if (tableStructure?.consumers?.hasProfilePhotoUrl) {
+
+        // Only select profile_photo_url if it exists
+        if (tableStructure?.consumers?.columns?.includes('profile_photo_url')) {
             selectFields.push('profile_photo_url');
-            console.log('✅ profile_photo_url column exists in consumers table');
+            console.log('✅ profile_photo_url column exists - will select it');
         } else {
-            console.log('❌ profile_photo_url column does NOT exist in consumers table - NEEDS TO BE ADDED');
+            console.log('ℹ️ profile_photo_url column not found - will not select it');
         }
-        
-        if (tableStructure?.consumers?.hasCreatedAt) {
+
+        // Only select timestamps if they exist
+        if (tableStructure?.consumers?.columns?.includes('created_at')) {
             selectFields.push('created_at');
+            console.log('✅ created_at column exists - will select it');
         }
-        
-        if (tableStructure?.consumers?.hasUpdatedAt) {
+        if (tableStructure?.consumers?.columns?.includes('updated_at')) {
             selectFields.push('updated_at');
+            console.log('✅ updated_at column exists - will select it');
         }
         
-        // Build consumer data object
+        // Build consumer data object - only use columns that actually exist in Supabase
         const consumerData = {
             username: userData.username,
             email: userData.email,
@@ -493,19 +495,21 @@ async function insertConsumer(userData) {
             password: hashedPassword,
             status: 'active'
         };
-        
-        // CRITICAL: Always add profile_photo_url to the insert data
-        // Check if column exists in table
+
+        // Only add profile_photo_url if the column actually exists in the database
         if (tableStructure?.consumers?.columns?.includes('profile_photo_url')) {
             consumerData.profile_photo_url = profilePhotoUrl;
             console.log('✅ Adding profile_photo_url to insert data:', profilePhotoUrl || '(empty string)');
         } else {
-            console.log('❌ WARNING: profile_photo_url column not found in consumers table');
-            console.log('📋 Available columns:', tableStructure?.consumers?.columns || []);
-            
-            // Try to add it anyway in case the check failed
-            consumerData.profile_photo_url = profilePhotoUrl;
-            console.log('⚠️ Attempting to add profile_photo_url anyway:', profilePhotoUrl || '(empty string)');
+            console.log('ℹ️ profile_photo_url column not found in consumers table - skipping');
+        }
+
+        // Only add timestamps if they exist
+        if (tableStructure?.consumers?.columns?.includes('created_at')) {
+            // Let database handle created_at with DEFAULT NOW()
+        }
+        if (tableStructure?.consumers?.columns?.includes('updated_at')) {
+            // Let database handle updated_at with DEFAULT NOW()
         }
         
         console.log('📝 Final consumer data to insert:', Object.keys(consumerData));
@@ -690,19 +694,25 @@ async function insertFarmer(farmerData) {
         const tableStructure = await checkTableStructure();
         console.log('🔍 Table structure:', tableStructure?.farmers);
         
-        // Build SELECT fields based on what exists
+        // Build SELECT fields based on what actually exists in the database
         const selectFields = ['id', 'username', 'email', 'mobile', 'farm_name', 'status'];
-        
-        if (tableStructure?.farmers?.hasAccountVerified) {
+
+        // Only select columns if they exist
+        if (tableStructure?.farmers?.columns?.includes('account_verified')) {
             selectFields.push('account_verified');
+            console.log('✅ account_verified column exists');
         }
-        
-        if (tableStructure?.farmers?.hasCreatedAt) {
+        if (tableStructure?.farmers?.columns?.includes('created_at')) {
             selectFields.push('created_at');
+            console.log('✅ created_at column exists');
         }
-        
-        if (tableStructure?.farmers?.hasProfilePhotoUrl) {
+        if (tableStructure?.farmers?.columns?.includes('profile_photo_url')) {
             selectFields.push('profile_photo_url');
+            console.log('✅ profile_photo_url column exists');
+        }
+        if (tableStructure?.farmers?.columns?.includes('updated_at')) {
+            selectFields.push('updated_at');
+            console.log('✅ updated_at column exists');
         }
         
         const farmerInsertData = {
@@ -711,7 +721,6 @@ async function insertFarmer(farmerData) {
             aadhaar_number: farmerData.aadhaar_number,
             mobile: farmerData.mobile,
             password: hashedPassword,
-            profile_photo_url: profilePhotoUrl, // ALWAYS set this, even if empty string
             farm_name: farmerData.farm_name,
             farm_size: parseFloat(farmerData.farm_size) || 0,
             specialization: farmerData.specialization || 'Not specified',
@@ -724,6 +733,22 @@ async function insertFarmer(farmerData) {
             account_holder_name: farmerData.account_holder_name || '',
             account_number: farmerData.account_number || '',
             bank_name: farmerData.bank_name || '',
+            status: 'active'
+        };
+
+        // Only add profile_photo_url if column exists
+        if (tableStructure?.farmers?.columns?.includes('profile_photo_url')) {
+            farmerInsertData.profile_photo_url = profilePhotoUrl;
+            console.log('✅ Adding profile_photo_url to insert:', profilePhotoUrl || '(empty)');
+        } else {
+            console.log('ℹ️ profile_photo_url column not found - skipping');
+        }
+
+        // Only add account_verified if column exists
+        if (tableStructure?.farmers?.columns?.includes('account_verified')) {
+            farmerInsertData.account_verified = false;
+            console.log('✅ Adding account_verified to insert: false');
+        }
             ifsc_code: farmerData.ifsc_code || '',
             branch_name: farmerData.branch_name || '',
             aadhaar_verified: farmerData.aadhaar_verified || false,
