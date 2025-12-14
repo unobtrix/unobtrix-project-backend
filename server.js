@@ -1214,7 +1214,7 @@ app.post('/api/mobile/verify', (req, res) => {
         if (!storedData) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'No OTP found for this number. Please request a new OTP.' 
+                message: 'No OTP found for this number. Please request a new OTP.'
             });
         }
         
@@ -1222,7 +1222,7 @@ app.post('/api/mobile/verify', (req, res) => {
             otpStore.delete(mobile);
             return res.status(400).json({ 
                 success: false, 
-                message: 'OTP has expired. Please request a new OTP.' 
+                message: 'OTP has expired. Please request a new OTP.'
             });
         }
         
@@ -1290,7 +1290,7 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Failed to send Aadhaar OTP. Please try again.',
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -1906,6 +1906,220 @@ app.get('/api/debug/users', async (req, res) => {
     }
 });
 
+// ==================== PRODUCTS ENDPOINT ====================
+app.get('/api/products', async (req, res) => {
+    try {
+        console.log('📦 Fetching products...');
+        
+        const { 
+            search, 
+            category, 
+            farmer_id, 
+            limit = 50, 
+            offset = 0,
+            sort_by = 'created_at',
+            sort_order = 'desc'
+        } = req.query;
+
+        let query = supabase
+            .from('products')
+            .select(`
+                *,
+                farmers (
+                    id,
+                    name,
+                    location,
+                    phone
+                )
+            `)
+            .eq('is_active', true)
+            .range(offset, offset + parseInt(limit) - 1);
+
+        // Apply filters
+        if (search && search.trim()) {
+            query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%,category.ilike.%${search}%`);
+        }
+
+        if (category && category !== 'all') {
+            query = query.eq('category', category);
+        }
+
+        if (farmer_id) {
+            query = query.eq('farmer_id', farmer_id);
+        }
+
+        // Apply sorting
+        if (sort_by && ['name', 'price', 'created_at', 'stock_quantity'].includes(sort_by)) {
+            query = query.order(sort_by, { ascending: sort_order === 'asc' });
+        }
+
+        const { data: products, error, count } = await query;
+        
+        if (error) {
+            console.error('❌ Error fetching products:', error);
+            return res.status(500).json({ 
+                error: 'Failed to fetch products',
+                details: error.message 
+            });
+        }
+
+        console.log(`✅ Found ${products?.length || 0} products`);
+        
+        res.json({
+            success: true,
+            data: products || [],
+            count: products?.length || 0,
+            total: count,
+            filters: {
+                search: search || null,
+                category: category || null,
+                farmer_id: farmer_id || null,
+                limit: parseInt(limit),
+                offset: parseInt(offset),
+                sort_by,
+                sort_order
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Unexpected error in products endpoint:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            details: error.message 
+        });
+    }
+});
+
+// Get single product by ID
+app.get('/api/products/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        console.log(`📦 Fetching product ${id}...`);
+
+        const { data: product, error } = await supabase
+            .from('products')
+            .select(`
+                *,
+                farmers (
+                    id,
+                    name,
+                    location,
+                    phone,
+                    email
+                )
+            `)
+            .eq('id', id)
+            .eq('is_active', true)
+            .single();
+
+        if (error) {
+            console.error('❌ Error fetching product:', error);
+            return res.status(500).json({ 
+                error: 'Failed to fetch product',
+                details: error.message 
+            });
+        }
+
+        if (!product) {
+            return res.status(404).json({ 
+                error: 'Product not found' 
+            });
+        }
+
+        console.log(`✅ Found product: ${product.name}`);
+        
+        res.json({
+            success: true,
+            data: product
+        });
+
+    } catch (error) {
+        console.error('❌ Unexpected error in product endpoint:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            details: error.message 
+        });
+    }
+});
+
+// ==================== TOURS ENDPOINT ====================
+app.get('/api/tours', async (req, res) => {
+    try {
+        console.log('🎢 Fetching tours...');
+        
+        const { 
+            search, 
+            farmer_id, 
+            limit = 20, 
+            offset = 0,
+            sort_by = 'created_at',
+            sort_order = 'desc'
+        } = req.query;
+
+        let query = supabase
+            .from('tours')
+            .select(`
+                *,
+                farmers (
+                    id,
+                    name,
+                    location,
+                    phone
+                )
+            `)
+            .eq('is_active', true)
+            .range(offset, offset + parseInt(limit) - 1);
+
+        // Apply filters
+        if (search && search.trim()) {
+            query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+        }
+
+        if (farmer_id) {
+            query = query.eq('farmer_id', farmer_id);
+        }
+
+        // Apply sorting
+        if (sort_by && ['name', 'price', 'created_at', 'duration'].includes(sort_by)) {
+            query = query.order(sort_by, { ascending: sort_order === 'asc' });
+        }
+
+        const { data: tours, error, count } = await query;
+        
+        if (error) {
+            console.error('❌ Error fetching tours:', error);
+            return res.status(500).json({ 
+                error: 'Failed to fetch tours',
+                details: error.message 
+            });
+        }
+
+        console.log(`✅ Found ${tours?.length || 0} tours`);
+        
+        res.json({
+            success: true,
+            data: tours || [],
+            count: tours?.length || 0,
+            total: count,
+            filters: {
+                search: search || null,
+                farmer_id: farmer_id || null,
+                limit: parseInt(limit),
+                offset: parseInt(offset),
+                sort_by,
+                sort_order
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Unexpected error in tours endpoint:', error);
+        res.status(500).json({ 
+            error: 'Internal server error',
+            details: error.message 
+        });
+    }
+});
+
 // ==================== ROOT ENDPOINT ====================
 app.get('/', async (req, res) => {
     try {
@@ -2108,6 +2322,9 @@ app.listen(PORT, async () => {
        GET  /health                    - Health check
        GET  /api/login                 - Login endpoint info (GET)
        POST /api/login                 - User login (POST)
+       GET  /api/products              - Get all products (with filters)
+       GET  /api/products/:id          - Get single product by ID
+       GET  /api/tours                 - Get all tours (with filters)
        POST /api/register/consumer     - Register consumer
        POST /api/register/farmer       - Register farmer
        POST /api/migrate-passwords     - Migrate plain text passwords to hashes
