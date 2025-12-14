@@ -749,21 +749,8 @@ async function insertFarmer(farmerData) {
             farmerInsertData.account_verified = false;
             console.log('✅ Adding account_verified to insert: false');
         }
-            ifsc_code: farmerData.ifsc_code || '',
-            branch_name: farmerData.branch_name || '',
-            aadhaar_verified: farmerData.aadhaar_verified || false,
-            mobile_verified: farmerData.mobile_verified || false,
-            status: 'pending_verification'
-        };
         
-        // Add account_verified only if column exists
-        if (tableStructure?.farmers?.hasAccountVerified) {
-            farmerInsertData.account_verified = false;
-            console.log('✅ Setting account_verified: false');
-        }
-        
-        console.log('📝 Farmer data to insert:', Object.keys(farmerInsertData));
-        console.log('📝 profile_photo_url value:', profilePhotoUrl || '(empty string)');
+        console.log('📝 Final farmer data to insert:', Object.keys(farmerInsertData));
         console.log('📋 Will select:', selectFields);
         
         const { data, error } = await supabase
@@ -772,65 +759,20 @@ async function insertFarmer(farmerData) {
             .select(selectFields.join(', '));
 
         if (error) {
-            console.error('❌ Farmer database insert error:', error);
+            console.error('❌ Database insert error:', error);
             console.error('Error details:', {
                 message: error.message,
                 details: error.details,
                 hint: error.hint,
                 code: error.code
             });
-            
-            if (error.code === '42703') {
-                console.error('\n🔧 MISSING COLUMN DETECTED!');
-                console.error('=============================================');
-                console.error('Your farmers table is missing columns.');
-                console.error('\n📋 CURRENT COLUMNS:', tableStructure?.farmers?.columns || []);
-                console.error('\n🛠️ FIX REQUIRED:');
-                console.error('1. Check your farmers table in Supabase');
-                console.error('2. Add missing columns:');
-                console.error('   - account_verified (BOOLEAN DEFAULT false)');
-                console.error('   - created_at (TIMESTAMP DEFAULT now())');
-                console.error('   - profile_photo_url (TEXT NOT NULL DEFAULT "")');
-                console.error('\n💡 QUICK FIX: Run this SQL in Supabase SQL Editor:');
-                console.error(`
-                    -- Add account_verified if missing
-                    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS account_verified BOOLEAN DEFAULT false;
-                    
-                    -- Add created_at if missing  
-                    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();
-                    
-                    -- Add profile_photo_url if missing (with NOT NULL constraint)
-                    ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';
-                    
-                    -- Verify columns exist
-                    SELECT column_name FROM information_schema.columns 
-                    WHERE table_name = 'farmers' AND table_schema = 'public';
-                `);
-            } else if (error.code === '23502') {
-                console.error('\n🔧 NULL CONSTRAINT VIOLATION!');
-                console.error('The profile_photo_url column has a NOT NULL constraint.');
-                console.error('Make sure you are always providing a value for this column.');
-                console.error('Current value being sent:', profilePhotoUrl);
-            }
-            
             throw error;
         }
 
-        console.log('✅ Farmer saved successfully! ID:', data[0].id);
-        console.log('✅ Farm name:', data[0].farm_name);
-        console.log('✅ Status:', data[0].status);
-        
-        if (data[0].account_verified !== undefined) {
-            console.log('✅ Account verified:', data[0].account_verified);
-        }
-        
-        if (data[0].profile_photo_url !== undefined) {
-            console.log('✅ Profile photo URL:', data[0].profile_photo_url || '(empty string)');
-        }
-        
-        if (data[0].created_at) {
-            console.log('🕒 Created at:', data[0].created_at);
-        }
+        console.log('✅ Farmer saved successfully!');
+        console.log(`✅ ID: ${data[0].id}`);
+        console.log(`✅ Username: ${data[0].username}`);
+        console.log(`✅ Farm Name: ${data[0].farm_name}`);
         
         return { success: true, data: data[0] };
         
