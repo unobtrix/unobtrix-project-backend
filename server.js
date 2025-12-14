@@ -66,8 +66,7 @@ function generateOTP(length = 6) {
     return otp;
 }
 
-// ==================== SUPABASE HELPER FUNCTIONS ====================
-
+// ==================== PASSWORD HELPER FUNCTIONS ====================
 async function hashPassword(password) {
     try {
         const salt = await bcrypt.genSalt(10);
@@ -78,6 +77,16 @@ async function hashPassword(password) {
     }
 }
 
+async function verifyPassword(password, hashedPassword) {
+    try {
+        return await bcrypt.compare(password, hashedPassword);
+    } catch (error) {
+        console.error('Error verifying password:', error);
+        return false;
+    }
+}
+
+// ==================== SUPABASE HELPER FUNCTIONS ====================
 async function checkUserExists(email, mobile) {
     try {
         const { data: consumers, error: consumerError } = await supabase
@@ -687,6 +696,93 @@ async function insertFarmer(farmerData) {
     }
 }
 
+// ==================== LOGIN ENDPOINT ====================
+app.post('/api/login', async (req, res) => {
+    try {
+        const { email, password, userType = 'consumer' } = req.body;
+        
+        console.log('🔐 Login attempt for:', email, 'Type:', userType);
+        
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email and password are required'
+            });
+        }
+        
+        // Determine which table to query
+        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
+        
+        // Find user by email
+        const { data: users, error: findError } = await supabase
+            .from(tableName)
+            .select('id, username, email, password, status, profile_photo_url')
+            .eq('email', email.toLowerCase().trim())
+            .limit(1);
+        
+        if (findError) {
+            console.error('Database error:', findError);
+            return res.status(500).json({
+                success: false,
+                message: 'Login failed'
+            });
+        }
+        
+        if (!users || users.length === 0) {
+            console.log('❌ User not found:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+        
+        const user = users[0];
+        
+        // Verify password using your password hashing utility
+        console.log('🔐 Verifying password...');
+        const isValid = await verifyPassword(password, user.password);
+        
+        if (!isValid) {
+            console.log('❌ Invalid password for:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid email or password'
+            });
+        }
+        
+        // Check account status
+        if (user.status !== 'active' && user.status !== 'pending_verification') {
+            console.log('⚠️ Account not active:', user.status);
+            return res.status(403).json({
+                success: false,
+                message: `Account is ${user.status}. Please contact support.`
+            });
+        }
+        
+        console.log('✅ Login successful for:', email);
+        
+        // Remove password from response
+        const { password: _, ...safeUser } = user;
+        
+        res.json({
+            success: true,
+            message: 'Login successful',
+            user: {
+                ...safeUser,
+                user_type: userType
+            },
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ Login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Login failed. Please try again.'
+        });
+    }
+});
+
 // ==================== HEALTH CHECK ====================
 app.get('/health', async (req, res) => {
     try {
@@ -704,10 +800,11 @@ app.get('/health', async (req, res) => {
                 consumers: tableStructure?.consumers?.idType || 'unknown',
                 farmers: tableStructure?.farmers?.idType || 'unknown'
             },
-            features: ['registration', 'image-upload', 'otp-verification', 'bigint-ids'],
+            features: ['registration', 'image-upload', 'otp-verification', 'bigint-ids', 'login'],
             endpoints: {
                 health: 'GET /health',
                 check_structure: 'GET /api/check-structure',
+                login: 'POST /api/login',
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
                 mobile_otp: 'POST /api/mobile/send-otp',
@@ -1679,7 +1776,8 @@ app.get('/', async (req, res) => {
                 otp: 'Mobile & Aadhaar verification',
                 security: 'Password hashing with bcrypt',
                 consumer_ids: 'BIGINT (auto-incrementing)',
-                photo_saving: 'Fixed profile_photo_url saving'
+                photo_saving: 'Fixed profile_photo_url saving',
+                login: 'Email/password authentication'
             },
             endpoints: {
                 health: 'GET /health',
@@ -1687,6 +1785,7 @@ app.get('/', async (req, res) => {
                 fix_consumers_id: 'GET /api/fix-consumers-id',
                 fix_consumers_columns: 'GET /api/fix-consumers-columns',
                 check_bucket: 'GET /api/check-bucket',
+                login: 'POST /api/login',
                 register_consumer: 'POST /api/register/consumer',
                 register_farmer: 'POST /api/register/farmer',
                 test_upload: 'POST /api/test-upload',
@@ -1758,7 +1857,6 @@ setInterval(() => {
 const PORT = process.env.PORT || 5000;
 
 // ==================== UPDATED SERVER START MESSAGE ====================
-// In the server.listen() callback, update the startup message:
 app.listen(PORT, async () => {
     console.log(`
     🚀 FarmTrials Backend Server v8.1
@@ -1783,91 +1881,7 @@ app.listen(PORT, async () => {
         console.log('6. Create bucket');
         console.log('\n⚠️ Without bucket, photo uploads will fail but registration will still work.');
     }
-    app.post('/api/login', async (req, res) => {
-    try {
-        const { email, password, userType = 'consumer' } = req.body;
-        
-        console.log('🔐 Login attempt for:', email, 'Type:', userType);
-        
-        if (!email || !password) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email and password are required'
-            });
-        }
-        
-        // Determine which table to query
-        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
-        
-        // Find user by email
-        const { data: users, error: findError } = await supabase
-            .from(tableName)
-            .select('id, username, email, password, status, profile_photo_url')
-            .eq('email', email.toLowerCase().trim())
-            .limit(1);
-        
-        if (findError) {
-            console.error('Database error:', findError);
-            return res.status(500).json({
-                success: false,
-                message: 'Login failed'
-            });
-        }
-        
-        if (!users || users.length === 0) {
-            console.log('❌ User not found:', email);
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid email or password'
-            });
-        }
-        
-        const user = users[0];
-        
-        // Verify password using your password hashing utility
-        console.log('🔐 Verifying password...');
-        const isValid = await verifyPassword(password, user.password);
-        
-        if (!isValid) {
-            console.log('❌ Invalid password for:', email);
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid email or password'
-            });
-        }
-        
-        // Check account status
-        if (user.status !== 'active' && user.status !== 'pending_verification') {
-            console.log('⚠️ Account not active:', user.status);
-            return res.status(403).json({
-                success: false,
-                message: `Account is ${user.status}. Please contact support.`
-            });
-        }
-        
-        console.log('✅ Login successful for:', email);
-        
-        // Remove password from response
-        const { password: _, ...safeUser } = user;
-        
-        res.json({
-            success: true,
-            message: 'Login successful',
-            user: {
-                ...safeUser,
-                user_type: userType
-            },
-            timestamp: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ Login error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Login failed. Please try again.'
-        });
-    }
-});
+    
     console.log('\n🔍 Checking table structure...');
     const structure = await checkTableStructure();
     const consumersFix = await addMissingColumnToConsumers();
@@ -1881,6 +1895,7 @@ app.listen(PORT, async () => {
     📸 Profile Photo Column: ${consumersHasPhotoColumn ? '✅ Exists' : '❌ MISSING - photos won\'t save!'}
     🕒 Timestamps: ${structure?.farmers?.hasCreatedAt ? '✅ created_at exists' : '❌ created_at missing'}
     ✅ Account Verified: ${structure?.farmers?.hasAccountVerified ? '✅ Column exists' : '❌ Column missing'}
+    🔐 Login System: ✅ Email/password authentication ready
     🔒 Security: Password hashing with bcrypt
     🌐 Frontend: https://unobtrix.netlify.app
     
@@ -1902,6 +1917,7 @@ app.listen(PORT, async () => {
        GET  /api/fix-consumers-id      - Fix consumers ID type
        GET  /api/fix-consumers-columns - Add missing columns
        GET  /api/check-bucket          - Check bucket status
+       POST /api/login                 - User login endpoint
        POST /api/register/consumer     - Test registration
        GET  /api/debug/users           - Check existing users
     `);
