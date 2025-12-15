@@ -14,6 +14,10 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
+// Constants
+const MIN_KEY_LENGTH = 100;  // Minimum length for a valid JWT key
+const EXPECTED_KEY_LENGTH = 200;  // Typical length for Supabase anon key
+
 console.log('\n🔍 Supabase Credentials Validator\n');
 console.log('='.repeat(60));
 
@@ -68,8 +72,8 @@ if (!supabaseKey.startsWith('eyJ')) {
     process.exit(1);
 }
 
-if (supabaseKey.length < 100) {
-    console.error('❌ SUPABASE_ANON_KEY is too short (expected 200+ characters)');
+if (supabaseKey.length < MIN_KEY_LENGTH) {
+    console.error('❌ SUPABASE_ANON_KEY is too short (expected ' + EXPECTED_KEY_LENGTH + '+ characters)');
     console.error('   Current length:', supabaseKey.length);
     console.error('\n💡 The key might have been truncated during copy/paste');
     process.exit(1);
