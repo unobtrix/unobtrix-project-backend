@@ -127,14 +127,15 @@ ORDER BY ordinal_position;
 Test your deployed API:
 
 ```bash
+# Replace YOUR-SERVICE-NAME with your actual Render service name
 # Health check
-curl https://unobtrix-project-backend.onrender.com/health
+curl https://YOUR-SERVICE-NAME.onrender.com/health
 
 # Storage check
-curl https://unobtrix-project-backend.onrender.com/api/check-bucket
+curl https://YOUR-SERVICE-NAME.onrender.com/api/check-bucket
 
 # Structure check
-curl https://unobtrix-project-backend.onrender.com/api/check-structure
+curl https://YOUR-SERVICE-NAME.onrender.com/api/check-structure
 ```
 
 All should return success responses.

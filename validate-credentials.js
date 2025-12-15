@@ -77,7 +77,7 @@ if (!supabaseKey.startsWith('eyJ')) {
 }
 
 if (supabaseKey.length < MIN_KEY_LENGTH) {
-    console.error(`❌ SUPABASE_ANON_KEY is too short (expected ${EXPECTED_KEY_LENGTH}+ characters)`);
+    console.error(`❌ SUPABASE_ANON_KEY is too short (expected ${MIN_KEY_LENGTH}+ characters, typical ${EXPECTED_KEY_LENGTH}+)`);
     console.error('   Current length:', supabaseKey.length);
     console.error('\n💡 The key might have been truncated during copy/paste');
     process.exit(1);
