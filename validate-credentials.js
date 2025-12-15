@@ -14,7 +14,11 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
-// Constants
+// Constants for Supabase JWT key validation
+// Supabase anon keys are JWT tokens that typically:
+// - Start with "eyJ" (base64 encoded JWT header)
+// - Are at least 100 characters (minimum valid JWT length)
+// - Are typically 200+ characters for Supabase anon keys
 const MIN_KEY_LENGTH = 100;  // Minimum length for a valid JWT key
 const EXPECTED_KEY_LENGTH = 200;  // Typical length for Supabase anon key
 
@@ -73,7 +77,7 @@ if (!supabaseKey.startsWith('eyJ')) {
 }
 
 if (supabaseKey.length < MIN_KEY_LENGTH) {
-    console.error('❌ SUPABASE_ANON_KEY is too short (expected ' + EXPECTED_KEY_LENGTH + '+ characters)');
+    console.error(`❌ SUPABASE_ANON_KEY is too short (expected ${EXPECTED_KEY_LENGTH}+ characters)`);
     console.error('   Current length:', supabaseKey.length);
     console.error('\n💡 The key might have been truncated during copy/paste');
     process.exit(1);
@@ -100,7 +104,7 @@ console.log('\n📋 Step 5: Testing database access...\n');
     try {
         const { data, error } = await supabase
             .from('consumers')
-            .select('count')
+            .select('id')
             .limit(1);
         
         if (error) {

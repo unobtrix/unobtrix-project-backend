@@ -98,7 +98,7 @@ Run this SQL in your Supabase SQL Editor:
 ```sql
 -- Add missing columns to consumers table
 ALTER TABLE consumers 
-ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS profile_photo_url TEXT DEFAULT '',
 ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now(),
 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();
 

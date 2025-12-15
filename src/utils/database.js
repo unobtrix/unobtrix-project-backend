@@ -338,7 +338,7 @@ async function addMissingColumnToConsumers() {
         const sqlCommands = [];
         
         if (missingColumns.includes('profile_photo_url')) {
-            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';');
+            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT DEFAULT \'\';');
         }
         
         if (missingColumns.includes('created_at')) {
