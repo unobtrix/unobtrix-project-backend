@@ -6,6 +6,9 @@
  * and provides a testing checklist for manual verification.
  */
 
+const fs = require('fs');
+const path = require('path');
+
 const endpoints = {
   "Authentication": [
     {
@@ -319,8 +322,6 @@ console.log('   ✓ Sensitive data protection in logs');
 console.log('   ✓ OTPs only exposed in development/test mode\n');
 
 console.log('📦 MODULE STRUCTURE:\n');
-const fs = require('fs');
-const path = require('path');
 
 function listFiles(dir, prefix = '') {
   try {
@@ -336,7 +337,10 @@ function listFiles(dir, prefix = '') {
       }
     });
   } catch (err) {
-    // Ignore errors
+    // Silently ignore errors for missing directories (e.g., when src/ doesn't exist)
+    if (err.code !== 'ENOENT') {
+      console.error(`Error listing files in ${dir}:`, err.message);
+    }
   }
 }
 
