@@ -84,10 +84,7 @@ After adding environment variables and redeploying:
 🔗 Supabase connected
 ✅ Server is running with all functionality!
 📋 Available endpoints:
-   GET /api/products - Get all products (with filters)
-   GET /api/tours - Get all tours (with filters)
-   POST /api/login - User login
-   ...etc
+
 ```
 
 ---
