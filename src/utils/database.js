@@ -50,6 +50,18 @@ async function checkTableStructure() {
             .select('*')
             .limit(1);
         
+        if (farmerError) {
+            // Check for authentication errors
+            if (farmerError.message && (farmerError.message.includes('Invalid Compact JWS') || 
+                                        farmerError.message.includes('JWT') || 
+                                        farmerError.message.includes('token'))) {
+                console.error('❌ Error checking farmers table: Invalid Compact JWS');
+                console.error('🔐 Authentication error - check SUPABASE_ANON_KEY');
+                return null;
+            }
+            console.warn('⚠️ Could not check farmers table:', farmerError.message);
+        }
+        
         let farmerColumns = [];
         if (!farmerError && farmerData && farmerData.length > 0) {
             farmerColumns = Object.keys(farmerData[0]);
@@ -60,6 +72,18 @@ async function checkTableStructure() {
             .from('consumers')
             .select('*')
             .limit(1);
+        
+        if (consumerError) {
+            // Check for authentication errors
+            if (consumerError.message && (consumerError.message.includes('Invalid Compact JWS') || 
+                                          consumerError.message.includes('JWT') || 
+                                          consumerError.message.includes('token'))) {
+                console.error('❌ Error checking consumers table: Invalid Compact JWS');
+                console.error('🔐 Authentication error - check SUPABASE_ANON_KEY');
+                return null;
+            }
+            console.warn('⚠️ Could not check consumers table:', consumerError.message);
+        }
         
         let consumerColumns = [];
         if (!consumerError && consumerData && consumerData.length > 0) {
@@ -110,7 +134,13 @@ async function checkTableStructure() {
         };
         
     } catch (error) {
-        console.error('Error checking table structure:', error);
+        console.error('Error checking table structure:', error.message || error);
+        
+        // Check for authentication errors
+        if (error && error.message && error.message.includes('Invalid Compact JWS')) {
+            console.error('🔐 Authentication error - check your SUPABASE_ANON_KEY');
+        }
+        
         return null;
     }
 }
@@ -130,6 +160,24 @@ async function checkBucketExists() {
             .list('', { limit: 1 });
         
         if (error) {
+            // Check for authentication/credential errors
+            if (error.message && (error.message.includes('Invalid Compact JWS') || 
+                                  error.message.includes('JWT') || 
+                                  error.message.includes('token'))) {
+                console.error('❌ Error accessing bucket: Invalid Compact JWS');
+                console.error('\n🔐 AUTHENTICATION ERROR!');
+                console.error('This error means your SUPABASE_ANON_KEY is invalid or malformed.');
+                console.error('\n📋 How to fix:');
+                console.error('1. Go to: https://app.supabase.com/project/_/settings/api');
+                console.error('2. Copy the "anon" or "public" key (NOT the service_role key)');
+                console.error('3. The key should start with "eyJ" and be very long');
+                console.error('4. Set it as SUPABASE_ANON_KEY in your environment');
+                console.error('\n🔧 On Render.com:');
+                console.error('   Dashboard → Environment → Edit SUPABASE_ANON_KEY');
+                console.error('   Paste the entire key without any spaces or quotes');
+                return false;
+            }
+            
             if (error.message && error.message.includes('not found')) {
                 console.error('❌ Bucket "profile-photos" does not exist!');
                 console.error('\n⚠️ MANUAL ACTION REQUIRED ⚠️');
@@ -151,7 +199,13 @@ async function checkBucketExists() {
         return true;
         
     } catch (error) {
-        console.error('❌ Error checking bucket:', error);
+        console.error('❌ Error checking bucket:', error.message || error);
+        
+        // Check if it's an authentication error
+        if (error && error.message && error.message.includes('Invalid Compact JWS')) {
+            console.error('\n🔐 This is an authentication error - check your SUPABASE_ANON_KEY');
+        }
+        
         return false;
     }
 }
