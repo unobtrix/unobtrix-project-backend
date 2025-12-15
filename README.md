@@ -329,9 +329,19 @@ git push heroku main
 2. **Rotate Supabase keys** regularly
 3. **Enable Row Level Security (RLS)** in Supabase for all tables
 4. **Use HTTPS** in production
-5. **Implement rate limiting** for OTP endpoints
+5. **Implement rate limiting** for authentication and OTP endpoints (see TODO below)
 6. **Add JWT token validation** for protected routes
 7. **Enable API request logging** and monitoring
+
+### TODO: Rate Limiting
+
+The following endpoints should have rate limiting implemented before production deployment:
+- `/api/login` - Protect against brute force attacks
+- `/api/mobile/send-otp` - Prevent OTP spam
+- `/api/aadhaar/send-otp` - Prevent OTP spam
+- `/api/register/*` - Prevent mass registration abuse
+
+Consider using packages like `express-rate-limit` or `rate-limiter-flexible` for implementation.
 
 ## License
 
