@@ -18,14 +18,12 @@ Your Render deployment is failing because environment variables are not set.
 #### Variable 1:
 ```
 Key: SUPABASE_URL
-Value: https://ribehublefecccabzwkv.supabase.co
-```
+
 
 #### Variable 2:
 ```
 Key: SUPABASE_ANON_KEY
-Value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpYmVodWJsZWZlY2NjYWJ6d2t2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzMzg1ODksImV4cCI6MjA3NjkxNDU4OX0.4i6yQOCAisuFnElBKzCf_kdfl1SV5t6OknEVmPfySYc
-```
+
 
 ### Step 3: Redeploy
 1. Go back to **Dashboard** tab
