@@ -64,8 +64,6 @@ After adding the above, your environment should have:
 ### Test Locally:
 ```bash
 # Set environment variables locally
-$env:SUPABASE_URL = "https://ribehublefecccabzwkv.supabase.co"
-$env:SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpYmVodWJsZWZlY2NjYWJ6d2t2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzMzg1ODksImV4cCI6MjA3NjkxNDU4OX0.4i6yQOCAisuFnElBKzCf_kdfl1SV5t6OknEVmPfySYc"
 
 # Test server
 node server.js
