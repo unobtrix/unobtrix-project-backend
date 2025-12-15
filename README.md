@@ -269,6 +269,21 @@ Note: No build step is required for this Node.js project.
 
 ## Deployment
 
+### ⚠️ Before Deploying: Validate Your Credentials
+
+To avoid deployment errors, validate your Supabase credentials locally first:
+
+```bash
+# Create .env file with your credentials
+cp .env.example .env
+# Edit .env and add your SUPABASE_URL and SUPABASE_ANON_KEY
+
+# Run the validation script
+node validate-credentials.js
+```
+
+If all tests pass ✅, you're ready to deploy!
+
 ### Deploy to Render
 
 1. Create a new Web Service on [Render](https://render.com)
@@ -279,7 +294,9 @@ Note: No build step is required for this Node.js project.
 4. Add environment variables in the Render dashboard
 5. Deploy!
 
-See [RENDER-ENV-SETUP.md](RENDER-ENV-SETUP.md) for detailed instructions.
+**Having deployment issues?** See [RENDER-FIX.md](RENDER-FIX.md) for troubleshooting the "Invalid Compact JWS" error.
+
+See [RENDER-ENV-SETUP.md](RENDER-ENV-SETUP.md) for detailed setup instructions.
 
 ### Deploy to Railway
 
