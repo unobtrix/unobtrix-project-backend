@@ -114,8 +114,9 @@ async function login(req, res) {
         // Remove password from response
         const { password: _, ...safeUser } = user;
         
-        // Generate a simple token
-        const token = Buffer.from(`${Date.now()}:${user.id}`).toString('base64');
+        // Generate a cryptographically secure token
+        const crypto = require('crypto');
+        const token = crypto.randomBytes(32).toString('hex');
         
         const responseData = {
             success: true,

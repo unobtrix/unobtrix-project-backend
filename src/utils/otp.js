@@ -1,16 +1,17 @@
+const crypto = require('crypto');
+
 // In-memory storage for OTPs
 const otpStore = new Map();
 
 /**
- * Generate a random OTP of specified length
+ * Generate a cryptographically secure random OTP of specified length
  * @param {number} length - Length of OTP (default: 6)
  * @returns {string} Generated OTP
  */
 function generateOTP(length = 6) {
-    const digits = '0123456789';
     let otp = '';
     for (let i = 0; i < length; i++) {
-        otp += digits[Math.floor(Math.random() * 10)];
+        otp += crypto.randomInt(0, 10).toString();
     }
     return otp;
 }

@@ -21,14 +21,20 @@ async function sendMobileOTP(req, res) {
         
         console.log(`✅ OTP ${otp} generated for ${mobile}`);
         
-        return res.json({
+        // Only include OTP in response for development/testing
+        const responseData = {
             success: true,
             message: 'OTP sent successfully to your mobile number',
-            otp: otp,
-            debug_otp: otp,
             expiry: '10 minutes',
             timestamp: new Date().toISOString()
-        });
+        };
+        
+        // Include OTP only in development mode
+        if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+            responseData.debug_otp = otp;
+        }
+        
+        return res.json(responseData);
         
     } catch (error) {
         console.error('❌ Error generating OTP:', error);
@@ -105,14 +111,20 @@ async function sendAadhaarOTP(req, res) {
         
         console.log(`✅ Aadhaar OTP ${otp} generated for ${aadhaar_number}`);
         
-        return res.json({
+        // Only include OTP in response for development/testing
+        const responseData = {
             success: true,
             message: 'Aadhaar verification OTP sent successfully',
-            otp: otp,
-            debug_otp: otp,
             expiry: '10 minutes',
             timestamp: new Date().toISOString()
-        });
+        };
+        
+        // Include OTP only in development mode
+        if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+            responseData.debug_otp = otp;
+        }
+        
+        return res.json(responseData);
         
     } catch (error) {
         console.error('❌ Error generating Aadhaar OTP:', error);

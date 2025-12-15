@@ -192,6 +192,24 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
         const buffer = Buffer.from(base64Data, 'base64');
         
         console.log(`📊 Buffer size: ${buffer.length} bytes`);
+        
+        // Validate buffer size (max 50MB as configured in body-parser)
+        const maxSize = 50 * 1024 * 1024; // 50MB
+        if (buffer.length > maxSize) {
+            console.error(`❌ Image too large: ${buffer.length} bytes (max: ${maxSize} bytes)`);
+            return '';
+        }
+        
+        // Validate it's actually an image by checking magic bytes
+        const isPNG = buffer[0] === 0x89 && buffer[1] === 0x50;
+        const isJPEG = buffer[0] === 0xFF && buffer[1] === 0xD8;
+        const isGIF = buffer[0] === 0x47 && buffer[1] === 0x49;
+        const isWebP = buffer[8] === 0x57 && buffer[9] === 0x45;
+        
+        if (!isPNG && !isJPEG && !isGIF && !isWebP) {
+            console.error('❌ Invalid image file - magic bytes check failed');
+            return '';
+        }
 
         const { data, error } = await supabase.storage
             .from(bucketName)
@@ -424,7 +442,8 @@ async function insertConsumer(userData) {
         
         // Check if profile_photo_url was returned
         if (data[0].profile_photo_url !== undefined) {
-            console.log('📸 Photo URL saved in database:', data[0].profile_photo_url || '(empty string)');
+            const hasPhoto = !!data[0].profile_photo_url;
+            console.log('📸 Photo URL saved in database:', hasPhoto ? 'Yes' : 'No (empty)');
         } else {
             console.log('❌ profile_photo_url not returned in response - column might not exist');
         }
@@ -572,7 +591,7 @@ async function insertFarmer(farmerData) {
 
         console.log('✅ Farmer saved successfully!');
         console.log(`✅ ID: ${data[0].id}`);
-        console.log(`✅ Profile Photo URL: ${data[0].profile_photo_url || '(empty string)'}`);
+        console.log(`✅ Profile Photo URL: ${data[0].profile_photo_url ? 'Provided' : 'Not provided'}`);
         
         return { success: true, data: data[0] };
         
