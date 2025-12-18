@@ -1,0 +1,257 @@
+[33mcommit 6dc0dbcce8cedbe3d1e61e8d40c7e2f45f9ff310[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Mon Dec 15 19:42:07 2025 +0530
+
+    Update RENDER-ENV-SETUP.md
+
+[33mcommit 709d620e1fc84c3ceea8ef0d5ed79d48b637b4a9[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Mon Dec 15 19:40:59 2025 +0530
+
+    Update RENDER-ENV-SETUP.md
+
+[33mcommit a6abbfcac1ad70942712eda8a3c63183fdc0a632[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Mon Dec 15 19:40:14 2025 +0530
+
+    Update RENDER-ENV-SETUP.md
+
+[33mcommit 32607d9a2f414de5f8cf936e33b97b0f5fe15556[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Mon Dec 15 00:30:31 2025 +0530
+
+    Update server.js
+
+[33mcommit 4b014f32cbe5049e6d457f98e6e68323f7a97097[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Mon Dec 15 00:13:11 2025 +0530
+
+    Update server.js
+
+[33mcommit b508b5fe72e375e67af6df6968edff483fe77ce2[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 23:03:01 2025 +0530
+
+    Fix: Resolve 7 syntax errors - duplicate farmer code removed
+
+[33mcommit 5ca7b41041151bd3bf042a966c86ff0dacac10dc[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 22:58:47 2025 +0530
+
+    Fix: Only insert columns that actually exist in Supabase tables
+
+[33mcommit c9827bfa516a1dfcc1edbff9f420c43eed256291[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 20:34:37 2025 +0530
+
+    Add environment variable debugging
+
+[33mcommit 43bb9b6405c8016fae62ba43a2b4289c5631be1f[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 20:23:26 2025 +0530
+
+    Update RENDER-ENV-SETUP.md
+
+[33mcommit ed35dade4f7cec613254fa5b97d539018ee91e02[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 20:17:27 2025 +0530
+
+    Create RENDER-ENV-SETUP.md
+
+[33mcommit f07de675285a68829c3c0e8636815082d0bfb932[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 19:56:56 2025 +0530
+
+    Update server.js
+
+[33mcommit 2c613f15a29eb9b798450ee0cdf19f47d2a683dd[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 18:51:32 2025 +0530
+
+    gitignore
+
+[33mcommit 4533d60d5064f1dcb235f9a09833adf77e077ba0[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 18:23:00 2025 +0530
+
+    Update server.js
+
+[33mcommit 8408eae5b7c323d8ba210be29d2bc727b6570aa0[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 16:35:09 2025 +0530
+
+    Update server.js
+
+[33mcommit cecf1468d31a421594fde34d2a57daf5ecf6e418[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 16:04:23 2025 +0530
+
+    Update server.js
+
+[33mcommit d880b3f8ecf3f4856473aa51afcfed32ecab211e[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 15:41:28 2025 +0530
+
+    Update server.js
+
+[33mcommit 9a4647909057df46099d1af7ff3bd0aea3552f7b[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 15:37:54 2025 +0530
+
+    Update server.js
+
+[33mcommit ea1953b6c1da25e7af044f4b86e9b035883c4ffd[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 15:26:47 2025 +0530
+
+    Update server.js
+
+[33mcommit 3af5c852f6118cbd43d60ffe4e7ad0bbd9ab027c[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 14:35:22 2025 +0530
+
+    Update server.js
+
+[33mcommit 2face93a1a0af505c6b717846bd80ed6c5c27fe4[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Sun Dec 14 14:14:12 2025 +0530
+
+    Update server.js
+
+[33mcommit 31f4ff6bf5c298444d8508b29b66ccc00a7e6be8[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Thu Dec 11 22:12:41 2025 +0530
+
+    Update server.js
+
+[33mcommit 070e923965250897eba5312b53ad6fa8bc815704[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Thu Dec 11 21:44:34 2025 +0530
+
+    Update server.js
+
+[33mcommit a4ca0871e9e7adce969b5a0744fdb63143a63f98[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Thu Dec 11 20:21:14 2025 +0530
+
+    Update server.js
+
+[33mcommit d163aa31b1273246215afd7fd55018df0772a0a7[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Thu Dec 11 19:38:48 2025 +0530
+
+    Update server.js
+
+[33mcommit 3a18c2f9d8e8d222177426bc990f44b81d7ae081[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 20:17:30 2025 +0530
+
+    Update server.js
+
+[33mcommit 3f67e150b8d1ff48f69739e857f2044b8a31f119[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 19:46:02 2025 +0530
+
+    Update server.js
+
+[33mcommit 6a42fa59a76ab03d9b531c563424da993a9efac9[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 18:06:08 2025 +0530
+
+    Update server.js
+
+[33mcommit a038ea26cc0843d81d291e6447e41092a862e4c4[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 17:25:57 2025 +0530
+
+    Update server.js
+
+[33mcommit c629d92fdd8931fb39932db923848a44ceca8bed[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 16:56:14 2025 +0530
+
+    Update server.js
+
+[33mcommit e3e349d92f7cb5b812e6c7f158156c601b682fdf[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 16:13:52 2025 +0530
+
+    Update server.js
+
+[33mcommit 60b1fe5075772995fc0f0f593415d526ed4a929d[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 13:39:05 2025 +0530
+
+    Update server.js
+
+[33mcommit c6c8748c64efd9bcd249e5e485dd22bdce4a9604[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 12:47:25 2025 +0530
+
+    Update server.js
+
+[33mcommit a6d9a2c208449ef9ca4ad2dca5ad2aee3c12b0e1[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 11:12:37 2025 +0530
+
+    Update server.js
+
+[33mcommit 7f3ef3a7bb5e50b8051d87f16b8d8759c90ccad9[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 10:36:14 2025 +0530
+
+    Update server.js
+
+[33mcommit 4957d0ff9c5c17d119674bb9effef99e1b9a69a5[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 04:41:08 2025 +0530
+
+    Update server.js
+
+[33mcommit d44f66bb9c4901d5b07ca35c568e1c633e54f800[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 04:11:31 2025 +0530
+
+    modules_dowloaded
+
+[33mcommit 0e896712ddc5f8a3136396ace22f2a88c2593426[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 03:34:00 2025 +0530
+
+    Update server.js
+
+[33mcommit 212d328b20f2e808db72ebd8999127483ef27bcd[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 02:48:00 2025 +0530
+
+    Update server.js
+
+[33mcommit 542d8402dc2dc0e3f869cbc0499fcbb783781656[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 02:23:44 2025 +0530
+
+    Update server.js
+
+[33mcommit bfb342cbddef8bfe36e7aa1d2d64e3b05ce5764e[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Wed Dec 10 02:12:27 2025 +0530
+
+    Update server.js
+
+[33mcommit 3c41fc9c8194d215b1b55683e58cb9caf3555fd8[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Tue Dec 9 23:43:32 2025 +0530
+
+    Update package.json
+
+[33mcommit 7ce37c723cdea3a947ebe56faef897a79b4f5f55[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Tue Dec 9 23:02:09 2025 +0530
+
+    Add files via upload
+
+[33mcommit 31898bf6d2475853a064ec59214b0b2f46e40693[m
+Author: unobtrix <unobtrix1@gmail.com>
+Date:   Tue Dec 9 22:58:36 2025 +0530
+
+    Initial commit
