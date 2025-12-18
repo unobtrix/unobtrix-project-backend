@@ -21,7 +21,6 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
-
 console.log('🔗 Supabase connected');
 // ================================================================
 
@@ -338,6 +337,46 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
     } catch (error) {
         console.error('❌ Error uploading to storage:', error);
         return '';
+    }
+}
+
+// ==================== PRODUCT IMAGE UPLOAD ====================
+async function uploadProductImage(base64Image, farmerId) {
+    try {
+        if (!base64Image || !base64Image.startsWith("data:image/")) {
+            return null;
+        }
+
+        const matches = base64Image.match(/^data:image\/(\w+);base64,/);
+        const fileExt = matches ? matches[1] : "jpg";
+
+        const fileName = `products/${farmerId}/${Date.now()}_${Math.random()
+            .toString(36)
+            .slice(2)}.${fileExt}`;
+
+        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+
+        const { error } = await supabase.storage
+            .from("product-photos")
+            .upload(fileName, buffer, {
+                contentType: `image/${fileExt}`,
+                upsert: false,
+            });
+
+        if (error) {
+            console.error("Image upload failed:", error);
+            return null;
+        }
+
+        const { data } = supabase.storage
+            .from("product-photos")
+            .getPublicUrl(fileName);
+
+        return data.publicUrl;
+    } catch (err) {
+        console.error("uploadProductImage error:", err);
+        return null;
     }
 }
 
@@ -1864,6 +1903,7 @@ app.get('/api/debug/users', async (req, res) => {
 });
 
 // ==================== PRODUCTS ENDPOINT ====================
+// GET all products with filters
 app.get('/api/products', async (req, res) => {
     try {
         console.log('📦 Fetching products...');
@@ -1982,6 +2022,283 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
+// POST new product with image upload
+app.post("/api/products", async (req, res) => {
+    try {
+        const {
+            farmer_id,
+            name,
+            description,
+            category,
+            price,
+            stock,
+            unit,
+            is_organic = false,
+            location,
+            status = "active",
+            fulfillment_status = "not_sent",
+            images = []
+        } = req.body;
+
+        if (!farmer_id || !name || !price) {
+            return res.status(400).json({
+                success: false,
+                message: "farmer_id, name, and price are required"
+            });
+        }
+
+        // Upload images
+        const uploadedImages = [];
+        
+        for (const img of images) {
+            if (img.startsWith("data:image/")) {
+                const url = await uploadProductImage(img, farmer_id);
+                if (url) uploadedImages.push(url);
+            } else {
+                uploadedImages.push(img); // already URL
+            }
+        }
+
+        const { data, error } = await supabase
+            .from("products")
+            .insert([{
+                farmer_id,
+                name,
+                description,
+                category,
+                price,
+                stock,
+                unit,
+                is_organic,
+                location,
+                status,
+                fulfillment_status,
+                image_url: uploadedImages, // TEXT[] or JSONB
+                is_active: true,
+                created_at: new Date().toISOString()
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error("Insert error:", error);
+            return res.status(500).json({
+                success: false,
+                message: "Failed to create product",
+                error: error.message
+            });
+        }
+
+        res.json({
+            success: true,
+            message: "Product created successfully",
+            product: data
+        });
+
+    } catch (err) {
+        console.error("POST /api/products error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: err.message
+        });
+    }
+});
+
+// PUT update product
+app.put("/api/products/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const updateObj = {
+            ...req.body,
+            updated_at: new Date().toISOString()
+        };
+
+        delete updateObj.id;
+        delete updateObj.farmer_id;
+
+        const { data, error } = await supabase
+            .from("products")
+            .update(updateObj)
+            .eq("id", id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.json({
+            success: true,
+            message: "Product updated",
+            product: data
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to update product"
+        });
+    }
+});
+
+// DELETE product
+app.delete("/api/products/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const { data, error } = await supabase
+            .from("products")
+            .delete()
+            .eq("id", id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.json({
+            success: true,
+            message: "Product deleted",
+            product: data
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to delete product"
+        });
+    }
+});
+
+// GET public products for consumers
+app.get("/api/public/products", async (req, res) => {
+    try {
+        const { category, is_organic } = req.query;
+
+        let query = supabase
+            .from("products")
+            .select("*")
+            .eq("is_active", true)
+            .eq("status", "active")
+            .order("created_at", { ascending: false });
+
+        if (category) query = query.eq("category", category);
+        if (is_organic !== undefined)
+            query = query.eq("is_organic", is_organic === "true");
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        res.json({
+            success: true,
+            count: data.length,
+            products: data
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch products"
+        });
+    }
+});
+
+// GET single public product
+app.get("/api/public/products/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "product id is required"
+            });
+        }
+
+        const { data, error } = await supabase
+            .from("products")
+            .select(`
+                id,
+                name,
+                description,
+                category,
+                price,
+                stock,
+                unit,
+                image_url,
+                is_organic,
+                location,
+                status,
+                fulfillment_status,
+                farmer_id,
+                created_at
+            `)
+            .eq("id", id)
+            .eq("is_active", true)
+            .eq("status", "active")
+            .single();
+
+        if (error || !data) {
+            return res.status(404).json({
+                success: false,
+                message: "Product not found"
+            });
+        }
+
+        return res.json({
+            success: true,
+            product: data
+        });
+
+    } catch (err) {
+        console.error("GET /api/public/products/:id error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: err.message
+        });
+    }
+});
+
+// Update fulfillment status
+app.put("/api/products/:id/fulfillment", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { fulfillment_status } = req.body;
+
+        const allowed = ["not_sent", "pending", "in_transit", "received"];
+
+        if (!allowed.includes(fulfillment_status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid fulfillment status"
+            });
+        }
+
+        const { data, error } = await supabase
+            .from("products")
+            .update({ fulfillment_status })
+            .eq("id", id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.json({
+            success: true,
+            product: data
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: "Failed to update fulfillment"
+        });
+    }
+});
+
 // ==================== TOURS ENDPOINT ====================
 app.get('/api/tours', async (req, res) => {
     try {
@@ -2082,7 +2399,7 @@ app.get('/', async (req, res) => {
                 photo_saving: 'Fixed profile_photo_url NOT NULL handling',
                 login: 'Email/password authentication (GET & POST)',
                 cors: 'Configured for Netlify and localhost',
-                products: 'Product catalog with filters',
+                products: 'Product catalog with filters and CRUD',
                 tours: 'Tour listings with filters'
             },
             endpoints: {
@@ -2111,8 +2428,16 @@ app.get('/', async (req, res) => {
                     storage: 'GET /api/debug/storage',
                     users: 'GET /api/debug/users'
                 },
-                products: 'GET /api/products',
-                product_single: 'GET /api/products/:id',
+                products: {
+                    get_all: 'GET /api/products',
+                    get_single: 'GET /api/products/:id',
+                    create: 'POST /api/products',
+                    update: 'PUT /api/products/:id',
+                    delete: 'DELETE /api/products/:id',
+                    public_all: 'GET /api/public/products',
+                    public_single: 'GET /api/public/products/:id',
+                    fulfillment: 'PUT /api/products/:id/fulfillment'
+                },
                 tours: 'GET /api/tours',
                 migrate_passwords: 'POST /api/migrate-passwords'
             },
@@ -2124,6 +2449,25 @@ app.get('/', async (req, res) => {
         res.json({
             server: 'FarmTrials Registration API',
             status: 'operational',
+            error: error.message
+        });
+    }
+});
+
+// ==================== PASSWORD MIGRATION ENDPOINT ====================
+app.post('/api/migrate-passwords', async (req, res) => {
+    try {
+        console.log('🔄 Starting password migration...');
+        await migratePlainTextPasswords();
+        res.json({
+            success: true,
+            message: 'Password migration completed. Check server logs for details.'
+        });
+    } catch (error) {
+        console.error('Migration error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Password migration failed',
             error: error.message
         });
     }
@@ -2156,6 +2500,7 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
     console.error('💥 Server error:', err);
+    console.error('Error stack:', err.stack);
     res.status(500).json({
         success: false,
         message: 'Internal server error',
@@ -2179,26 +2524,7 @@ setInterval(() => {
     if (cleanedCount > 0) {
         console.log(`🧹 Cleaned up ${cleanedCount} expired OTPs`);
     }
-}, 60 * 60 * 1000);
-
-// ==================== PASSWORD MIGRATION ENDPOINT ====================
-app.post('/api/migrate-passwords', async (req, res) => {
-    try {
-        console.log('🔄 Starting password migration...');
-        await migratePlainTextPasswords();
-        res.json({
-            success: true,
-            message: 'Password migration completed. Check server logs for details.'
-        });
-    } catch (error) {
-        console.error('Migration error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Password migration failed',
-            error: error.message
-        });
-    }
-});
+}, 60 * 60 * 1000); // Clean up every hour
 
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
@@ -2244,7 +2570,7 @@ app.listen(PORT, async () => {
     🔐 Login System: ✅ Email/password authentication ready (GET & POST)
     🔒 Security: Password hashing with bcrypt
     🌐 CORS: Configured for Netlify and localhost
-    📦 Products: ✅ Catalog with filters
+    📦 Products: ✅ Full CRUD with image upload
     🎢 Tours: ✅ Listings with filters
     
     ${!consumersIdOk ? `
@@ -2265,7 +2591,13 @@ app.listen(PORT, async () => {
        GET  /api/login                 - Login endpoint info (GET)
        POST /api/login                 - User login (POST)
        GET  /api/products              - Get all products (with filters)
+       POST /api/products              - Create new product with images
        GET  /api/products/:id          - Get single product by ID
+       PUT  /api/products/:id          - Update product
+       DELETE /api/products/:id        - Delete product
+       GET  /api/public/products       - Public products for consumers
+       GET  /api/public/products/:id   - Public single product
+       PUT  /api/products/:id/fulfillment - Update fulfillment status
        GET  /api/tours                 - Get all tours (with filters)
        POST /api/register/consumer     - Register consumer
        POST /api/register/farmer       - Register farmer
@@ -2283,3 +2615,5 @@ app.listen(PORT, async () => {
        POST /api/upload-photo          - Upload profile photo
     `);
 });
+
+module.exports = app;
