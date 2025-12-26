@@ -952,6 +952,10 @@ app.post('/api/login', async (req, res) => {
         }
         
         console.log('✅ Login successful for:', email);
+        
+        // Remove password from response (define before logging)
+        const { password: _, ...safeUser } = user;
+
         console.log('📦 User data returned:', {
             id: safeUser.id,
             username: safeUser.username,
@@ -959,9 +963,6 @@ app.post('/api/login', async (req, res) => {
             status: safeUser.status,
             fields_count: Object.keys(safeUser).length
         });
-        
-        // Remove password from response
-        const { password: _, ...safeUser } = user;
         
         // Generate a simple token
         const token = Buffer.from(`${Date.now()}:${user.id}`).toString('base64');
