@@ -1,0 +1,21 @@
+# Netlify configuration file
+# Deploy settings and environment variables
+
+[build]
+  command = "npm run build"
+  publish = "public"
+
+# Environment variables for development
+[build.environment]
+  REACT_APP_API_BASE_URL = "http://localhost:5000"
+  REACT_APP_ENV = "development"
+
+# Context-specific settings
+[context.production]
+  environment = { REACT_APP_API_BASE_URL = "https://unobtrix-project-backend.onrender.com", REACT_APP_ENV = "production" }
+
+[context.deploy-preview]
+  environment = { REACT_APP_API_BASE_URL = "https://unobtrix-project-backend.onrender.com", REACT_APP_ENV = "staging" }
+
+[context.branch-deploy]
+  environment = { REACT_APP_API_BASE_URL = "https://unobtrix-project-backend.onrender.com", REACT_APP_ENV = "staging" }
