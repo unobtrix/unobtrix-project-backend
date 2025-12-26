@@ -899,7 +899,10 @@ app.post('/api/login', async (req, res) => {
         // Find user by email
         const { data: users, error: findError } = await supabase
             .from(tableName)
-            .select('id, username, email, password, status, profile_photo_url')
+            .select(userType === 'farmer' 
+                ? 'id, username, email, mobile, password, status, profile_photo_url, farm_name, farm_size, specialization, village, taluka, district, state, pin_code, account_holder_name, bank_name, branch_name'
+                : 'id, username, email, password, status, profile_photo_url'
+            )
             .eq('email', email.toLowerCase().trim())
             .limit(1);
         
@@ -916,9 +919,11 @@ app.post('/api/login', async (req, res) => {
         
         if (!users || users.length === 0) {
             console.log('❌ User not found:', email);
+            console.log('📊 Checked table:', tableName);
             return res.status(401).json({
                 success: false,
-                message: 'Invalid email or password'
+                message: 'Invalid email or password',
+                debug: `No ${tableName} account found with this email`
             });
         }
         
@@ -947,6 +952,13 @@ app.post('/api/login', async (req, res) => {
         }
         
         console.log('✅ Login successful for:', email);
+        console.log('📦 User data returned:', {
+            id: safeUser.id,
+            username: safeUser.username,
+            email: safeUser.email,
+            status: safeUser.status,
+            fields_count: Object.keys(safeUser).length
+        });
         
         // Remove password from response
         const { password: _, ...safeUser } = user;
