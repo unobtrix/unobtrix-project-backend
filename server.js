@@ -2380,6 +2380,226 @@ app.get('/api/tours', async (req, res) => {
     }
 });
 
+// ==================== PROFILE ENDPOINTS ====================
+
+// GET farmer profile by ID
+app.get('/api/farmer/profile/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        console.log(`🌾 Fetching farmer profile for ID: ${id}`);
+
+        const { data, error } = await supabase
+            .from('farmers')
+            .select('id, name, full_name, email, mobile, farm_name, location, phone, avatar_url, profile_photo_url, role, created_at, updated_at')
+            .eq('id', id)
+            .single();
+
+        if (error) {
+            console.error('❌ Error fetching farmer profile:', error);
+            return res.status(404).json({
+                success: false,
+                message: 'Farmer profile not found',
+                error: error.message
+            });
+        }
+
+        if (!data) {
+            return res.status(404).json({
+                success: false,
+                message: 'Farmer profile not found'
+            });
+        }
+
+        // Format the response
+        const profile = {
+            id: data.id,
+            full_name: data.full_name || data.name,
+            name: data.name || data.full_name,
+            email: data.email,
+            mobile: data.mobile,
+            phone: data.phone,
+            farm_name: data.farm_name,
+            location: data.location,
+            role: data.role || 'farmer',
+            avatar_url: data.avatar_url || data.profile_photo_url || '',
+            profile_photo_url: data.profile_photo_url || data.avatar_url || '',
+            created_at: data.created_at,
+            updated_at: data.updated_at
+        };
+
+        console.log('✅ Farmer profile fetched successfully');
+        res.json({
+            success: true,
+            profile: profile
+        });
+
+    } catch (err) {
+        console.error('❌ GET /api/farmer/profile/:id error:', err);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch farmer profile',
+            error: err.message
+        });
+    }
+});
+
+// GET customer profile by ID
+app.get('/api/customer/profile/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        console.log(`👤 Fetching customer profile for ID: ${id}`);
+
+        const { data, error } = await supabase
+            .from('consumers')
+            .select('id, name, full_name, email, mobile, phone, avatar_url, profile_photo_url, location, created_at, updated_at')
+            .eq('id', id)
+            .single();
+
+        if (error) {
+            console.error('❌ Error fetching customer profile:', error);
+            return res.status(404).json({
+                success: false,
+                message: 'Customer profile not found',
+                error: error.message
+            });
+        }
+
+        if (!data) {
+            return res.status(404).json({
+                success: false,
+                message: 'Customer profile not found'
+            });
+        }
+
+        // Format the response
+        const profile = {
+            id: data.id,
+            full_name: data.full_name || data.name,
+            name: data.name || data.full_name,
+            email: data.email,
+            mobile: data.mobile,
+            phone: data.phone,
+            location: data.location,
+            avatar_url: data.avatar_url || data.profile_photo_url || '',
+            profile_photo_url: data.profile_photo_url || data.avatar_url || '',
+            created_at: data.created_at,
+            updated_at: data.updated_at
+        };
+
+        console.log('✅ Customer profile fetched successfully');
+        res.json({
+            success: true,
+            profile: profile
+        });
+
+    } catch (err) {
+        console.error('❌ GET /api/customer/profile/:id error:', err);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch customer profile',
+            error: err.message
+        });
+    }
+});
+
+// UPDATE farmer profile
+app.put('/api/farmer/profile/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updateData = req.body;
+        
+        console.log(`🌾 Updating farmer profile for ID: ${id}`);
+
+        // Remove sensitive fields that shouldn't be updated directly
+        delete updateData.id;
+        delete updateData.password;
+        delete updateData.created_at;
+
+        // Set updated_at timestamp
+        updateData.updated_at = new Date().toISOString();
+
+        const { data, error } = await supabase
+            .from('farmers')
+            .update(updateData)
+            .eq('id', id)
+            .select('id, name, full_name, email, mobile, farm_name, location, phone, avatar_url, profile_photo_url, role, created_at, updated_at')
+            .single();
+
+        if (error) {
+            console.error('❌ Error updating farmer profile:', error);
+            return res.status(400).json({
+                success: false,
+                message: 'Failed to update farmer profile',
+                error: error.message
+            });
+        }
+
+        console.log('✅ Farmer profile updated successfully');
+        res.json({
+            success: true,
+            message: 'Farmer profile updated successfully',
+            profile: data
+        });
+
+    } catch (err) {
+        console.error('❌ PUT /api/farmer/profile/:id error:', err);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update farmer profile',
+            error: err.message
+        });
+    }
+});
+
+// UPDATE customer profile
+app.put('/api/customer/profile/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updateData = req.body;
+        
+        console.log(`👤 Updating customer profile for ID: ${id}`);
+
+        // Remove sensitive fields that shouldn't be updated directly
+        delete updateData.id;
+        delete updateData.password;
+        delete updateData.created_at;
+
+        // Set updated_at timestamp
+        updateData.updated_at = new Date().toISOString();
+
+        const { data, error } = await supabase
+            .from('consumers')
+            .update(updateData)
+            .eq('id', id)
+            .select('id, name, full_name, email, mobile, phone, avatar_url, profile_photo_url, location, created_at, updated_at')
+            .single();
+
+        if (error) {
+            console.error('❌ Error updating customer profile:', error);
+            return res.status(400).json({
+                success: false,
+                message: 'Failed to update customer profile',
+                error: error.message
+            });
+        }
+
+        console.log('✅ Customer profile updated successfully');
+        res.json({
+            success: true,
+            message: 'Customer profile updated successfully',
+            profile: data
+        });
+
+    } catch (err) {
+        console.error('❌ PUT /api/customer/profile/:id error:', err);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update customer profile',
+            error: err.message
+        });
+    }
+});
+
 // ==================== ROOT ENDPOINT ====================
 app.get('/', async (req, res) => {
     try {
@@ -2450,7 +2670,13 @@ app.get('/', async (req, res) => {
                     fulfillment: 'PUT /api/products/:id/fulfillment'
                 },
                 tours: 'GET /api/tours',
-                migrate_passwords: 'POST /api/migrate-passwords'
+                migrate_passwords: 'POST /api/migrate-passwords',
+                profiles: {
+                    get_farmer: 'GET /api/farmer/profile/:id',
+                    update_farmer: 'PUT /api/farmer/profile/:id',
+                    get_customer: 'GET /api/customer/profile/:id',
+                    update_customer: 'PUT /api/customer/profile/:id'
+                }
             },
             critical_check: structure?.consumers?.hasProfilePhotoUrl ? 
                 '✅ profile_photo_url column exists with NOT NULL constraint' : 
@@ -2503,7 +2729,11 @@ app.use((req, res) => {
             'GET /api/check-bucket',
             'GET /api/debug/users',
             'GET /api/products',
-            'GET /api/tours'
+            'GET /api/tours',
+            'GET /api/farmer/profile/:id',
+            'PUT /api/farmer/profile/:id',
+            'GET /api/customer/profile/:id',
+            'PUT /api/customer/profile/:id'
         ],
         timestamp: new Date().toISOString()
     });
@@ -2583,6 +2813,7 @@ app.listen(PORT, async () => {
     🌐 CORS: Configured for Netlify and localhost
     📦 Products: ✅ Full CRUD with image upload
     🎢 Tours: ✅ Listings with filters
+    👤 Profiles: ✅ Farmer & Customer profile management
     
     ${!consumersIdOk ? `
     ⚠️ CRITICAL: Consumers table id must be BIGINT (int8)
@@ -2624,6 +2855,10 @@ app.listen(PORT, async () => {
        POST /api/aadhaar/verify        - Verify Aadhaar OTP
        POST /api/test-upload           - Test image upload
        POST /api/upload-photo          - Upload profile photo
+       GET  /api/farmer/profile/:id    - Get farmer profile
+       PUT  /api/farmer/profile/:id    - Update farmer profile
+       GET  /api/customer/profile/:id  - Get customer profile
+       PUT  /api/customer/profile/:id  - Update customer profile
     `);
 });
 
