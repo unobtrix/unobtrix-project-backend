@@ -304,36 +304,34 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
             .from(bucketName)
             .upload(filename, buffer, {
                 contentType: `image/${fileExt}`,
+                cacheControl: '3600',
                 upsert: false
             });
 
         if (error) {
-            console.error('❌ Storage upload error:', error.message);
-            
-            if (error.message && error.message.includes('The resource was not found')) {
+            console.error('❌ Upload error:', error);
+            if (error.message && error.message.includes('not found')) {
                 console.error('❌ Bucket "profile-photos" not found!');
-                console.error('Please create it manually in Supabase Dashboard.');
-            } else if (error.message && error.message.includes('row-level security')) {
-                console.error('❌ RLS policy error!');
-                console.error('Please check RLS policies for storage tables.');
+                console.error('\n⚠️ PLEASE CREATE BUCKET IN SUPABASE DASHBOARD:');
+                console.error('1. Go to Storage → New bucket');
+                console.error('2. Name: profile-photos');
+                console.error('3. Public: ON');
+                console.error('4. Create bucket and restart server');
             }
-            
             return '';
         }
 
-        console.log('✅ Upload successful!');
-
-        const { data: urlData } = supabase.storage
+        const { data: { publicUrl } } = supabase.storage
             .from(bucketName)
             .getPublicUrl(filename);
 
-        console.log('✅ Image uploaded successfully to Supabase Storage');
-        console.log('🔗 Public URL:', urlData.publicUrl);
-
-        return urlData.publicUrl;
+        console.log('✅ Upload successful!');
+        console.log('📸 Public URL:', publicUrl);
+        
+        return publicUrl;
 
     } catch (error) {
-        console.error('❌ Error uploading to storage:', error);
+        console.error('❌ Unexpected upload error:', error);
         return '';
     }
 }
@@ -341,40 +339,37 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
 // ==================== PRODUCT IMAGE UPLOAD ====================
 async function uploadProductImage(base64Image, farmerId) {
     try {
-        if (!base64Image || !base64Image.startsWith("data:image/")) {
-            return null;
+        if (!base64Image || !base64Image.startsWith('data:image/')) {
+            return '';
         }
 
+        const timestamp = Date.now();
+        const randomString = Math.random().toString(36).substring(2, 15);
         const matches = base64Image.match(/^data:image\/(\w+);base64,/);
-        const fileExt = matches ? matches[1] : "jpg";
+        const fileExt = matches ? matches[1] : 'jpg';
+        const filename = `product_${farmerId}_${timestamp}_${randomString}.${fileExt}`;
+        const bucketName = 'profile-photos';
 
-        const fileName = `products/${farmerId}/${Date.now()}_${Math.random()
-            .toString(36)
-            .slice(2)}.${fileExt}`;
-
-        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
-        const buffer = Buffer.from(base64Data, "base64");
+        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
 
         const { error } = await supabase.storage
-            .from("product-photos")
-            .upload(fileName, buffer, {
+            .from(bucketName)
+            .upload(filename, buffer, {
                 contentType: `image/${fileExt}`,
-                upsert: false,
+                cacheControl: '3600',
+                upsert: false
             });
 
-        if (error) {
-            console.error("Image upload failed:", error);
-            return null;
-        }
+        if (error) return '';
 
-        const { data } = supabase.storage
-            .from("product-photos")
-            .getPublicUrl(fileName);
+        const { data: { publicUrl } } = supabase.storage
+            .from(bucketName)
+            .getPublicUrl(filename);
 
-        return data.publicUrl;
+        return publicUrl;
     } catch (err) {
-        console.error("uploadProductImage error:", err);
-        return null;
+        return '';
     }
 }
 
@@ -382,74 +377,60 @@ async function uploadProductImage(base64Image, farmerId) {
 async function checkTableStructure() {
     try {
         console.log('🔍 Checking table structure...');
-        
-        // Get one farmer to see columns
-        const { data: farmerData, error: farmerError } = await supabase
+
+        // Check farmers table
+        const { data: farmersData, error: farmersError } = await supabase
             .from('farmers')
             .select('*')
             .limit(1);
-        
-        let farmerColumns = [];
-        if (!farmerError && farmerData && farmerData.length > 0) {
-            farmerColumns = Object.keys(farmerData[0]);
-        }
-        
-        // Get one consumer to see columns
-        const { data: consumerData, error: consumerError } = await supabase
+
+        const farmerColumns = farmersData && farmersData.length > 0 ? Object.keys(farmersData[0]) : [];
+        console.log('📊 Farmers columns:', farmerColumns);
+
+        // Check consumers table
+        const { data: consumersData, error: consumersError } = await supabase
             .from('consumers')
             .select('*')
             .limit(1);
-        
-        let consumerColumns = [];
-        if (!consumerError && consumerData && consumerData.length > 0) {
-            consumerColumns = Object.keys(consumerData[0]);
-        }
-        
-        // Determine ID type
-        let consumerIdType = 'unknown';
-        if (consumerData && consumerData.length > 0 && consumerData[0].id !== undefined) {
-            const idValue = consumerData[0].id;
-            if (typeof idValue === 'string' && idValue.includes('-')) {
-                consumerIdType = 'uuid';
-            } else if (typeof idValue === 'number' || typeof idValue === 'bigint') {
-                consumerIdType = 'bigint';
-            } else if (typeof idValue === 'string' && /^\d+$/.test(idValue)) {
-                consumerIdType = 'bigint_string';
+
+        const consumerColumns = consumersData && consumersData.length > 0 ? Object.keys(consumersData[0]) : [];
+        console.log('📊 Consumers columns:', consumerColumns);
+
+        // Check consumers ID type
+        let consumersIdType = 'unknown';
+        if (consumersData && consumersData.length > 0) {
+            const idValue = consumersData[0].id;
+            const idType = typeof idValue;
+            
+            if (idType === 'number' && Number.isInteger(idValue)) {
+                consumersIdType = 'bigint';
+            } else if (idType === 'string' && /^\d+$/.test(idValue)) {
+                consumersIdType = 'bigint_string';
+            } else {
+                consumersIdType = idType;
             }
+            
+            console.log('🆔 Consumers ID sample:', idValue, 'Type:', idType, 'Classified as:', consumersIdType);
         }
-        
-        let farmerIdType = 'unknown';
-        if (farmerData && farmerData.length > 0 && farmerData[0].id !== undefined) {
-            const idValue = farmerData[0].id;
-            if (typeof idValue === 'string' && idValue.includes('-')) {
-                farmerIdType = 'uuid';
-            } else if (typeof idValue === 'number' || typeof idValue === 'bigint') {
-                farmerIdType = 'bigint';
-            } else if (typeof idValue === 'string' && /^\d+$/.test(idValue)) {
-                farmerIdType = 'bigint_string';
-            }
-        }
-        
+
         return {
             farmers: {
                 columns: farmerColumns,
-                hasUpdatedAt: farmerColumns.includes('updated_at'),
                 hasCreatedAt: farmerColumns.includes('created_at'),
+                hasUpdatedAt: farmerColumns.includes('updated_at'),
                 hasAccountVerified: farmerColumns.includes('account_verified'),
                 hasProfilePhotoUrl: farmerColumns.includes('profile_photo_url'),
-                idType: farmerIdType
             },
             consumers: {
                 columns: consumerColumns,
-                hasUpdatedAt: consumerColumns.includes('updated_at'),
                 hasCreatedAt: consumerColumns.includes('created_at'),
+                hasUpdatedAt: consumerColumns.includes('updated_at'),
                 hasProfilePhotoUrl: consumerColumns.includes('profile_photo_url'),
-                idType: consumerIdType
+                idType: consumersIdType
             }
         };
-        
     } catch (error) {
-        console.error('Error checking table structure:', error);
+        console.error('❌ Error checking table structure:', error);
         return null;
     }
 }
@@ -457,385 +438,243 @@ async function checkTableStructure() {
 // ==================== REGISTRATION WITH IMAGE UPLOAD ====================
 async function insertConsumer(userData) {
     try {
-        console.log('💾 Starting consumer registration...');
-        console.log('📊 Received user data keys:', Object.keys(userData));
-        
-        const hashedPassword = await hashPassword(userData.password);
-        
+        console.log('📝 insertConsumer called with data');
+        console.log('📸 Has photo data:', !!userData.profile_photo_base64 || !!userData.profile_photo_url);
+
         // CRITICAL FIX: Always ensure profile_photo_url has a non-null value
         let profilePhotoUrl = '';
         
         const photoData = userData.profile_photo_base64 || userData.profile_photo_url;
-        console.log('📸 Photo data present:', !!photoData);
         
-        if (photoData && photoData.startsWith('data:image/')) {
+        if (photoData) {
             console.log('📸 Processing profile photo upload to storage...');
             
-            const tempUserId = userData.username.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-            console.log('📤 Uploading to storage with temp ID:', tempUserId);
-            
-            const uploadedUrl = await uploadToSupabaseStorage(
-                photoData,
-                'consumer',
-                tempUserId
-            );
-            
-            if (uploadedUrl) {
-                profilePhotoUrl = uploadedUrl;
-                console.log('✅ Photo uploaded to storage URL:', profilePhotoUrl);
-            } else {
-                console.log('⚠️ Photo upload failed, using empty string');
-                profilePhotoUrl = '';
+            if (photoData.startsWith('data:image/')) {
+                console.log('📤 Uploading base64 image to Supabase Storage...');
+                profilePhotoUrl = await uploadToSupabaseStorage(
+                    photoData,
+                    'consumer',
+                    userData.id || Date.now()
+                );
+                console.log('📸 Upload result:', profilePhotoUrl ? 'Success' : 'Failed');
+            } else if (photoData.startsWith('http://') || photoData.startsWith('https://')) {
+                console.log('🔗 Using provided URL directly');
+                profilePhotoUrl = photoData;
             }
-        } else if (photoData && photoData.includes('http')) {
-            profilePhotoUrl = photoData;
-            console.log('✅ Using existing photo URL:', profilePhotoUrl);
-        } else {
-            console.log('⚠️ No valid photo data provided, using empty string');
-            profilePhotoUrl = '';
-        }
-        
-        console.log('💾 Inserting consumer into database...');
-        
-        // Check table structure first
-        const tableStructure = await checkTableStructure();
-        console.log('🔍 Consumers table structure:', tableStructure?.consumers);
-        
-        // Build select fields based on what actually exists in the database
-        const selectFields = ['id', 'username', 'email', 'mobile', 'status'];
-
-        // Only select profile_photo_url if it exists
-        if (tableStructure?.consumers?.columns?.includes('profile_photo_url')) {
-            selectFields.push('profile_photo_url');
-            console.log('✅ profile_photo_url column exists - will select it');
-        } else {
-            console.log('ℹ️ profile_photo_url column not found - will not select it');
         }
 
-        // Only select timestamps if they exist
-        if (tableStructure?.consumers?.columns?.includes('created_at')) {
-            selectFields.push('created_at');
-        }
-        if (tableStructure?.consumers?.columns?.includes('updated_at')) {
-            selectFields.push('updated_at');
-        }
-        
-        // CRITICAL FIX: Build consumer data with profile_photo_url ALWAYS included
-        const consumerData = {
-            username: userData.username,
-            email: userData.email,
+        console.log('📸 Final profile_photo_url value:', profilePhotoUrl || '(empty string)');
+
+        // Hash the password
+        const hashedPassword = await hashPassword(userData.password);
+        console.log('🔐 Password hashed successfully');
+
+        const consumerPayload = {
+            username: userData.username || userData.name,
+            email: userData.email.toLowerCase().trim(),
             mobile: userData.mobile,
             password: hashedPassword,
-            status: 'active',
-            profile_photo_url: profilePhotoUrl // ALWAYS included with value
+            status: userData.status || 'active',
+            profile_photo_url: profilePhotoUrl || '',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
         };
 
-        // Only add timestamps if they exist (let DB handle defaults)
-        if (tableStructure?.consumers?.columns?.includes('created_at')) {
-            // Will use DB default
-        }
-        if (tableStructure?.consumers?.columns?.includes('updated_at')) {
-            // Will use DB default
-        }
-        
-        console.log('📝 Final consumer data to insert:', consumerData);
-        console.log('📋 Will select:', selectFields);
-        
+        console.log('📦 Consumer payload prepared:', {
+            ...consumerPayload,
+            password: '[HIDDEN]',
+            profile_photo_url: consumerPayload.profile_photo_url ? 'SET' : 'EMPTY'
+        });
+
+        console.log('💾 Inserting into database...');
         const { data, error } = await supabase
             .from('consumers')
-            .insert([consumerData])
-            .select(selectFields.join(', '));
+            .insert([consumerPayload])
+            .select()
+            .single();
 
         if (error) {
             console.error('❌ Database insert error:', error);
-            console.error('Error details:', {
-                message: error.message,
-                details: error.details,
-                hint: error.hint,
-                code: error.code
-            });
-            
-            if (error.code === '42703') {
-                console.error('\n🔧 MISSING COLUMN DETECTED!');
-                console.error('The profile_photo_url column might not exist in the consumers table.');
-                console.error('\n🛠️ FIX: Run this SQL in Supabase SQL Editor:');
-                console.error(`ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';`);
-            } else if (error.code === '23502') {
-                console.error('\n🔧 NULL CONSTRAINT VIOLATION!');
-                console.error('The profile_photo_url column has a NOT NULL constraint.');
-                console.error('Current value being sent:', profilePhotoUrl);
-                console.error('\n🛠️ FIX: Ensure profile_photo_url is always provided (even empty string)');
-            } else if (error.code === '22P02') {
-                console.error('\n🔧 INVALID TEXT REPRESENTATION!');
-                console.error('This might be due to ID column type mismatch.');
-                console.error('Ensure consumers.id column is BIGINT (int8) in database.');
-            }
-            
             throw error;
         }
 
-        console.log('✅ Consumer saved successfully!');
-        console.log(`✅ ID: ${data[0].id}`);
-        console.log(`✅ Username: ${data[0].username}`);
-        console.log(`✅ Email: ${data[0].email}`);
-        
-        // Check if profile_photo_url was returned
-        if (data[0].profile_photo_url !== undefined) {
-            console.log('📸 Photo URL saved in database:', data[0].profile_photo_url || '(empty string)');
-        } else {
-            console.log('❌ profile_photo_url not returned in response - column might not exist');
-        }
-        
-        if (data[0].created_at) {
-            console.log('🕒 Created at:', data[0].created_at);
-        }
-        if (data[0].updated_at) {
-            console.log('🕒 Updated at:', data[0].updated_at);
-        }
-        
-        return { success: true, data: data[0] };
-        
+        console.log('✅ Consumer inserted successfully');
+        console.log('🆔 New consumer ID:', data.id);
+        console.log('📸 Stored profile_photo_url:', data.profile_photo_url || '(empty)');
+
+        return {
+            success: true,
+            consumer: data,
+            profile_photo_url: data.profile_photo_url || ''
+        };
+
     } catch (error) {
         console.error('❌ Error in insertConsumer:', error);
-        return { success: false, error: error.message };
+        throw error;
     }
 }
 
 // ==================== NEW FUNCTION: ADD MISSING COLUMN TO CONSUMERS ====================
 async function addMissingColumnToConsumers() {
     try {
-        console.log('🔍 Checking and fixing consumers table columns...');
+        console.log('🔍 Checking consumers table for missing columns...');
         
-        // First, check current structure
-        const tableStructure = await checkTableStructure();
+        const { data, error } = await supabase
+            .from('consumers')
+            .select('*')
+            .limit(1);
+
+        if (error) {
+            console.error('❌ Error checking consumers table:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+
+        const columns = data && data.length > 0 ? Object.keys(data[0]) : [];
         const missingColumns = [];
         
-        if (!tableStructure?.consumers?.hasProfilePhotoUrl) {
+        if (!columns.includes('profile_photo_url')) {
             missingColumns.push('profile_photo_url');
         }
-        
-        if (!tableStructure?.consumers?.hasCreatedAt) {
+        if (!columns.includes('created_at')) {
             missingColumns.push('created_at');
         }
-        
-        if (!tableStructure?.consumers?.hasUpdatedAt) {
+        if (!columns.includes('updated_at')) {
             missingColumns.push('updated_at');
         }
-        
-        if (missingColumns.length === 0) {
-            console.log('✅ All required columns exist in consumers table');
-            return { success: true, message: 'All columns exist' };
+
+        if (missingColumns.length > 0) {
+            console.log('⚠️ Missing columns:', missingColumns);
+            return {
+                success: false,
+                missingColumns: missingColumns,
+                sql_fix: `ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';\nALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();\nALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();`
+            };
         }
-        
-        console.log('❌ Missing columns in consumers table:', missingColumns);
-        
-        // Provide SQL to fix
-        const sqlCommands = [];
-        
-        if (missingColumns.includes('profile_photo_url')) {
-            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT \'\';');
-        }
-        
-        if (missingColumns.includes('created_at')) {
-            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();');
-        }
-        
-        if (missingColumns.includes('updated_at')) {
-            sqlCommands.push('ALTER TABLE consumers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT now();');
-        }
-        
-        const sql = sqlCommands.join('\n');
-        
+
+        console.log('✅ All required columns exist');
+        return {
+            success: true,
+            message: 'All required columns exist'
+        };
+
+    } catch (error) {
+        console.error('❌ Error in addMissingColumnToConsumers:', error);
         return {
             success: false,
-            message: 'Missing columns detected',
-            missingColumns,
-            sql_fix: sql,
-            instructions: 'Run the above SQL in Supabase SQL Editor to fix the consumers table'
+            error: error.message
         };
-        
-    } catch (error) {
-        console.error('Error checking consumers table:', error);
-        return { success: false, error: error.message };
     }
 }
 
 async function insertFarmer(farmerData) {
     try {
-        console.log('💾 Starting farmer registration...');
-        
-        const hashedPassword = await hashPassword(farmerData.password);
-        
-        // CRITICAL FIX: Always ensure profile_photo_url has a non-null value
+        console.log('📝 insertFarmer called');
+        console.log('📸 Has photo data:', !!farmerData.profile_photo_base64 || !!farmerData.profile_photo_url);
+
         let profilePhotoUrl = '';
         
         const photoData = farmerData.profile_photo_base64 || farmerData.profile_photo_url;
         
-        if (photoData && photoData.startsWith('data:image/')) {
-            console.log('📸 Processing farmer profile photo upload...');
+        if (photoData) {
+            console.log('📸 Processing farmer photo upload...');
             
-            const tempUserId = farmerData.username.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-            const uploadedUrl = await uploadToSupabaseStorage(
-                photoData,
-                'farmer',
-                tempUserId
-            );
-            
-            if (uploadedUrl) {
-                profilePhotoUrl = uploadedUrl;
-                console.log('✅ Farmer photo uploaded to:', profilePhotoUrl);
-            } else {
-                console.log('⚠️ Farmer photo upload failed, using empty string');
-                profilePhotoUrl = '';
-            }
-        } else if (photoData && photoData.includes('http')) {
-            profilePhotoUrl = photoData;
-            console.log('✅ Using existing farmer photo URL:', profilePhotoUrl);
-        } else {
-            console.log('⚠️ No valid photo data provided, using empty string');
-            profilePhotoUrl = '';
-        }
-
-        let certificationsArray = [];
-        if (farmerData.certifications) {
-            if (Array.isArray(farmerData.certifications)) {
-                certificationsArray = farmerData.certifications;
-            } else if (typeof farmerData.certifications === 'string') {
-                certificationsArray = farmerData.certifications.split(',').map(c => c.trim()).filter(c => c);
+            if (photoData.startsWith('data:image/')) {
+                profilePhotoUrl = await uploadToSupabaseStorage(
+                    photoData,
+                    'farmer',
+                    farmerData.id || Date.now()
+                );
+            } else if (photoData.startsWith('http://') || photoData.startsWith('https://')) {
+                profilePhotoUrl = photoData;
             }
         }
 
-        console.log('💾 Inserting farmer into database...');
-        
-        // Check table structure first
-        const tableStructure = await checkTableStructure();
-        console.log('🔍 Table structure:', tableStructure?.farmers);
-        
-        // Build SELECT fields based on what actually exists in the database
-        const selectFields = ['id', 'username', 'email', 'mobile', 'farm_name', 'status'];
+        // Hash the password
+        const hashedPassword = await hashPassword(farmerData.password);
 
-        // Only select columns if they exist
-        if (tableStructure?.farmers?.columns?.includes('account_verified')) {
-            selectFields.push('account_verified');
-        }
-        if (tableStructure?.farmers?.columns?.includes('created_at')) {
-            selectFields.push('created_at');
-        }
-        if (tableStructure?.farmers?.columns?.includes('profile_photo_url')) {
-            selectFields.push('profile_photo_url');
-        }
-        if (tableStructure?.farmers?.columns?.includes('updated_at')) {
-            selectFields.push('updated_at');
-        }
-        
-        // CRITICAL FIX: ALWAYS include profile_photo_url with value
-        const farmerInsertData = {
-            username: farmerData.username,
-            email: farmerData.email,
-            aadhaar_number: farmerData.aadhaar_number,
+        const farmerPayload = {
+            username: farmerData.username || farmerData.name,
+            email: farmerData.email.toLowerCase().trim(),
             mobile: farmerData.mobile,
             password: hashedPassword,
-            farm_name: farmerData.farm_name,
-            farm_size: parseFloat(farmerData.farm_size) || 0,
-            specialization: farmerData.specialization || 'Not specified',
-            certifications: certificationsArray,
+            status: farmerData.status || 'pending_verification',
+            profile_photo_url: profilePhotoUrl || '',
+            farm_name: farmerData.farm_name || '',
+            farm_size: farmerData.farm_size || '',
+            specialization: farmerData.specialization || '',
             village: farmerData.village || '',
             taluka: farmerData.taluka || '',
             district: farmerData.district || '',
             state: farmerData.state || '',
             pin_code: farmerData.pin_code || '',
             account_holder_name: farmerData.account_holder_name || '',
-            account_number: farmerData.account_number || '',
             bank_name: farmerData.bank_name || '',
-            status: 'active',
-            profile_photo_url: profilePhotoUrl // ALWAYS included
+            branch_name: farmerData.branch_name || '',
+            account_verified: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
         };
 
-        // Only add account_verified if column exists
-        if (tableStructure?.farmers?.columns?.includes('account_verified')) {
-            farmerInsertData.account_verified = false;
-        }
-        
-        console.log('📝 Final farmer data to insert:', Object.keys(farmerInsertData));
-        console.log('📸 Profile photo URL:', farmerInsertData.profile_photo_url || '(empty string)');
-        
+        console.log('💾 Inserting farmer into database...');
         const { data, error } = await supabase
             .from('farmers')
-            .insert([farmerInsertData])
-            .select(selectFields.join(', '));
+            .insert([farmerPayload])
+            .select()
+            .single();
 
         if (error) {
-            console.error('❌ Database insert error:', error);
-            console.error('Error details:', {
-                message: error.message,
-                details: error.details,
-                hint: error.hint,
-                code: error.code
-            });
-            
-            if (error.code === '23502' && error.message.includes('profile_photo_url')) {
-                console.error('\n❌ NULL constraint violation on profile_photo_url!');
-                console.error('Value being sent:', farmerInsertData.profile_photo_url);
-            }
-            
+            console.error('❌ Farmer insert error:', error);
             throw error;
         }
 
-        console.log('✅ Farmer saved successfully!');
-        console.log(`✅ ID: ${data[0].id}`);
-        console.log(`✅ Profile Photo URL: ${data[0].profile_photo_url || '(empty string)'}`);
-        
-        return { success: true, data: data[0] };
-        
+        console.log('✅ Farmer inserted successfully, ID:', data.id);
+
+        return {
+            success: true,
+            farmer: data,
+            profile_photo_url: data.profile_photo_url || ''
+        };
+
     } catch (error) {
         console.error('❌ Error in insertFarmer:', error);
-        return { success: false, error: error.message };
+        throw error;
     }
 }
 
 // ==================== HEALTH CHECK ====================
 app.get('/health', async (req, res) => {
     try {
-        const tableStructure = await checkTableStructure();
-        
-        res.json({ 
+        const { data, error } = await supabase
+            .from('farmers')
+            .select('count')
+            .limit(1);
+
+        if (error) {
+            return res.status(503).json({
+                status: 'unhealthy',
+                database: 'disconnected',
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        res.json({
             status: 'healthy',
-            server: 'FarmTrials Registration API',
-            timestamp: new Date().toISOString(),
-            supabase: 'Connected',
-            storage: 'Supabase Storage ready',
-            table_structure: tableStructure,
-            note: 'Complete registration system with image upload',
-            endpoints: {
-                health: 'GET /health',
-                check_structure: 'GET /api/check-structure',
-                login: {
-                    get: 'GET /api/login (for testing)',
-                    post: 'POST /api/login (for actual login)'
-                },
-                register_consumer: 'POST /api/register/consumer',
-                register_farmer: 'POST /api/register/farmer',
-                mobile_otp: 'POST /api/mobile/send-otp',
-                verify_mobile: 'POST /api/mobile/verify',
-                aadhaar_otp: 'POST /api/aadhaar/send-otp',
-                verify_aadhaar: 'POST /api/aadhaar/verify',
-                upload_photo: 'POST /api/upload-photo',
-                check_bucket: 'GET /api/check-bucket',
-                fix_consumers_id: 'GET /api/fix-consumers-id',
-                fix_consumers_columns: 'GET /api/fix-consumers-columns',
-                migrate_passwords: 'POST /api/migrate-passwords',
-                debug_storage: 'GET /api/debug/storage',
-                debug_users: 'GET /api/debug/users',
-                products: 'GET /api/products',
-                products_single: 'GET /api/products/:id',
-                tours: 'GET /api/tours'
-            }
+            database: 'connected',
+            supabase: {
+                url: supabaseUrl ? 'configured' : 'missing',
+                key: supabaseKey ? 'configured' : 'missing'
+            },
+            timestamp: new Date().toISOString()
         });
     } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: 'Health check failed',
-            error: error.message
+        res.status(503).json({
+            status: 'unhealthy',
+            error: error.message,
+            timestamp: new Date().toISOString()
         });
     }
 });
