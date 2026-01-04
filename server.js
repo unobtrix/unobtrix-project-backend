@@ -27,9 +27,7 @@ console.log('🔗 Supabase connected');
 // ==================== CORS CONFIGURATION ====================
 app.use(cors({
     origin: [
-        'https://resplendent-jelly-d55c77.netlify.app/',
-        'https://resplendent-jelly-d55c77.netlify.app/signup',
-        'https://resplendent-jelly-d55c77.netlify.app/customer.html',
+        'https://resplendent-jelly-d55c77.netlify.app',
         'http://localhost:3000',
         'http://localhost:5500',
         'http://127.0.0.1:5500',
