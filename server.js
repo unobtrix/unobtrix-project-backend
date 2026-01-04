@@ -1770,7 +1770,7 @@ app.get('/api/products', async (req, res) => {
 
         let query = supabase
             .from('products')
-            .select(`*, farmers (id, name, location, phone)`)
+            .select(`*, farmers (id, username, email, mobile, farm_name)`)
             .eq('is_active', true)
             .range(offset, offset + parseInt(limit) - 1);
 
@@ -1804,9 +1804,15 @@ app.get('/api/products', async (req, res) => {
 
         console.log(`✅ Found ${products?.length || 0} products`);
         
+        // Normalize image_url (TEXT[] in DB) to a single URL for the frontend
+        const normalizedProducts = (products || []).map(p => ({
+            ...p,
+            image_url: Array.isArray(p.image_url) ? (p.image_url[0] || '') : (p.image_url || ''),
+        }));
+
         res.json({
             success: true,
-            products: products || [],
+            products: normalizedProducts,
             count: products?.length || 0,
             total: count,
             filters: {
@@ -1837,7 +1843,7 @@ app.get('/api/products/:id', async (req, res) => {
 
         const { data: product, error } = await supabase
             .from('products')
-            .select(`*, farmers (id, name, location, phone, email)`)
+            .select(`*, farmers (id, username, email, mobile, farm_name)`)
             .eq('id', id)
             .eq('is_active', true)
             .single();
@@ -1858,9 +1864,14 @@ app.get('/api/products/:id', async (req, res) => {
 
         console.log(`✅ Found product: ${product.name}`);
         
+        const normalizedProduct = {
+            ...product,
+            image_url: Array.isArray(product.image_url) ? (product.image_url[0] || '') : (product.image_url || ''),
+        };
+        
         res.json({
             success: true,
-            product: product
+            product: normalizedProduct
         });
 
     } catch (error) {
@@ -2198,7 +2209,7 @@ app.get('/api/tours', async (req, res) => {
 
         let query = supabase
             .from('tours')
-            .select(`*, farmers (id, name, location, phone)`)
+            .select(`*, farmers (id, username, email, mobile, farm_name)`)
             .eq('is_active', true)
             .range(offset, offset + parseInt(limit) - 1);
 
@@ -2228,9 +2239,17 @@ app.get('/api/tours', async (req, res) => {
 
         console.log(`✅ Found ${tours?.length || 0} tours`);
         
+        const normalizedTours = (tours || []).map(t => ({
+            ...t,
+            // Map backend columns to frontend-friendly names
+            title: t.name,
+            price: t.price_per_person,
+            duration: t.duration_hours ? `${t.duration_hours} hours` : '',
+        }));
+
         res.json({
             success: true,
-            tours: tours || [],
+            tours: normalizedTours,
             count: tours?.length || 0,
             total: count,
             filters: {
