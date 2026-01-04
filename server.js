@@ -1806,7 +1806,7 @@ app.get('/api/products', async (req, res) => {
         
         res.json({
             success: true,
-            data: products || [],
+            products: products || [],
             count: products?.length || 0,
             total: count,
             filters: {
@@ -1860,7 +1860,7 @@ app.get('/api/products/:id', async (req, res) => {
         
         res.json({
             success: true,
-            data: product
+            product: product
         });
 
     } catch (error) {
@@ -1887,6 +1887,7 @@ app.post("/api/products", async (req, res) => {
             location,
             status = "active",
             fulfillment_status = "not_sent",
+            imageData,
             images = []
         } = req.body;
 
@@ -1897,15 +1898,27 @@ app.post("/api/products", async (req, res) => {
             });
         }
 
-        // Upload images
+        // Handle single imageData field or images array
+        let imageUrl = '';
         const uploadedImages = [];
         
-        for (const img of images) {
-            if (img.startsWith("data:image/")) {
-                const url = await uploadProductImage(img, farmer_id);
-                if (url) uploadedImages.push(url);
-            } else {
-                uploadedImages.push(img); // already URL
+        // Priority: imageData (single image from form) over images array
+        if (imageData && imageData.startsWith("data:image/")) {
+            console.log('📤 Uploading product image from imageData...');
+            imageUrl = await uploadProductImage(imageData, farmer_id);
+            if (imageUrl) {
+                uploadedImages.push(imageUrl);
+                console.log('✅ Product image uploaded:', imageUrl);
+            }
+        } else if (images && images.length > 0) {
+            // Fallback to images array for backward compatibility
+            for (const img of images) {
+                if (img.startsWith("data:image/")) {
+                    const url = await uploadProductImage(img, farmer_id);
+                    if (url) uploadedImages.push(url);
+                } else {
+                    uploadedImages.push(img); // already URL
+                }
             }
         }
 
@@ -1916,14 +1929,14 @@ app.post("/api/products", async (req, res) => {
                 name,
                 description,
                 category,
-                price,
-                stock,
+                price: parseFloat(price),
+                stock: parseInt(stock || 0, 10),
                 unit,
                 is_organic,
                 location,
                 status,
                 fulfillment_status,
-                image_url: uploadedImages, // TEXT[] or JSONB
+                image_url: uploadedImages.length > 0 ? uploadedImages[0] : '', // Store first image as string
                 is_active: true,
                 created_at: new Date().toISOString()
             }])
@@ -1939,6 +1952,7 @@ app.post("/api/products", async (req, res) => {
             });
         }
 
+        console.log('✅ Product created successfully:', data.name);
         res.json({
             success: true,
             message: "Product created successfully",
@@ -1959,11 +1973,22 @@ app.post("/api/products", async (req, res) => {
 app.put("/api/products/:id", async (req, res) => {
     try {
         const { id } = req.params;
+        const { imageData, ...otherFields } = req.body;
 
         const updateObj = {
-            ...req.body,
+            ...otherFields,
             updated_at: new Date().toISOString()
         };
+
+        // Upload new image if provided
+        if (imageData && imageData.startsWith('data:image/')) {
+            console.log('📤 Uploading updated product image...');
+            const imageUrl = await uploadProductImage(imageData, otherFields.farmer_id || 'unknown');
+            if (imageUrl) {
+                updateObj.image_url = imageUrl;
+                console.log('✅ Product image updated:', imageUrl);
+            }
+        }
 
         delete updateObj.id;
         delete updateObj.farmer_id;
@@ -1975,8 +2000,16 @@ app.put("/api/products/:id", async (req, res) => {
             .select()
             .single();
 
-        if (error) throw error;
+        if (error) {
+            console.error('Update error:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to update product',
+                error: error.message
+            });
+        }
 
+        console.log('✅ Product updated successfully:', data.name);
         res.json({
             success: true,
             message: "Product updated",
@@ -2197,7 +2230,7 @@ app.get('/api/tours', async (req, res) => {
         
         res.json({
             success: true,
-            data: tours || [],
+            tours: tours || [],
             count: tours?.length || 0,
             total: count,
             filters: {
