@@ -1933,6 +1933,10 @@ app.post("/api/products", async (req, res) => {
             }
         }
 
+        // Ensure uploadedImages is always an array and non-empty
+        const imagesToStore = uploadedImages.length > 0 ? uploadedImages : [];
+        console.log('🖼️ Images to store:', imagesToStore);
+
         const { data, error } = await supabase
             .from("products")
             .insert([{
@@ -1947,7 +1951,7 @@ app.post("/api/products", async (req, res) => {
                 location,
                 status,
                 fulfillment_status,
-                image_url: uploadedImages.length > 0 ? uploadedImages[0] : '', // Store first image as string
+                image_url: imagesToStore, // Store as array
                 is_active: true,
                 created_at: new Date().toISOString()
             }])
@@ -1984,20 +1988,34 @@ app.post("/api/products", async (req, res) => {
 app.put("/api/products/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const { imageData, ...otherFields } = req.body;
+        const { imageData, images = [], ...otherFields } = req.body;
 
         const updateObj = {
             ...otherFields,
             updated_at: new Date().toISOString()
         };
 
-        // Upload new image if provided
+        // Upload new images if provided
         if (imageData && imageData.startsWith('data:image/')) {
             console.log('📤 Uploading updated product image...');
             const imageUrl = await uploadProductImage(imageData, otherFields.farmer_id || 'unknown');
             if (imageUrl) {
-                updateObj.image_url = imageUrl;
+                updateObj.image_url = [imageUrl]; // Store as array
                 console.log('✅ Product image updated:', imageUrl);
+            }
+        } else if (images && images.length > 0) {
+            // Handle multiple images
+            const uploadedImages = [];
+            for (const img of images) {
+                if (img.startsWith("data:image/")) {
+                    const url = await uploadProductImage(img, otherFields.farmer_id || 'unknown');
+                    if (url) uploadedImages.push(url);
+                } else {
+                    uploadedImages.push(img); // already URL
+                }
+            }
+            if (uploadedImages.length > 0) {
+                updateObj.image_url = uploadedImages; // Store as array
             }
         }
 
