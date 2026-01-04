@@ -2229,7 +2229,7 @@ app.get('/api/farmer/profile/:id', async (req, res) => {
 
         const { data, error } = await supabase
             .from('farmers')
-            .select('id, name, full_name, email, mobile, farm_name, location, phone, avatar_url, profile_photo_url, role, created_at, updated_at')
+            .select('id, username, email, mobile, farm_name, farm_size, specialization, village, taluka, district, state, pin_code, profile_photo_url, status, account_verified, created_at, updated_at')
             .eq('id', id)
             .single();
 
@@ -2252,16 +2252,26 @@ app.get('/api/farmer/profile/:id', async (req, res) => {
         // Format the response
         const profile = {
             id: data.id,
-            full_name: data.full_name || data.name,
-            name: data.name || data.full_name,
+            username: data.username,
+            name: data.username,
+            full_name: data.username,
             email: data.email,
             mobile: data.mobile,
-            phone: data.phone,
+            phone: data.mobile,
             farm_name: data.farm_name,
-            location: data.location,
-            role: data.role || 'farmer',
-            avatar_url: data.avatar_url || data.profile_photo_url || '',
-            profile_photo_url: data.profile_photo_url || data.avatar_url || '',
+            farm_size: data.farm_size,
+            specialization: data.specialization,
+            village: data.village,
+            taluka: data.taluka,
+            district: data.district,
+            state: data.state,
+            pin_code: data.pin_code,
+            location: `${data.village || ''}, ${data.district || ''}, ${data.state || ''}`.replace(/(^[, ]+|[, ]+$)/g, ''),
+            role: 'farmer',
+            status: data.status,
+            account_verified: data.account_verified,
+            avatar_url: data.profile_photo_url || '',
+            profile_photo_url: data.profile_photo_url || '',
             created_at: data.created_at,
             updated_at: data.updated_at
         };
@@ -2290,7 +2300,7 @@ app.get('/api/customer/profile/:id', async (req, res) => {
 
         const { data, error } = await supabase
             .from('consumers')
-            .select('id, name, full_name, email, mobile, phone, avatar_url, profile_photo_url, location, created_at, updated_at')
+            .select('id, username, email, mobile, profile_photo_url, status, created_at, updated_at')
             .eq('id', id)
             .single();
 
@@ -2313,14 +2323,16 @@ app.get('/api/customer/profile/:id', async (req, res) => {
         // Format the response
         const profile = {
             id: data.id,
-            full_name: data.full_name || data.name,
-            name: data.name || data.full_name,
+            username: data.username,
+            name: data.username,
+            full_name: data.username,
             email: data.email,
             mobile: data.mobile,
-            phone: data.phone,
-            location: data.location,
-            avatar_url: data.avatar_url || data.profile_photo_url || '',
-            profile_photo_url: data.profile_photo_url || data.avatar_url || '',
+            phone: data.mobile,
+            location: '',
+            status: data.status,
+            avatar_url: data.profile_photo_url || '',
+            profile_photo_url: data.profile_photo_url || '',
             created_at: data.created_at,
             updated_at: data.updated_at
         };
@@ -2361,7 +2373,7 @@ app.put('/api/farmer/profile/:id', async (req, res) => {
             .from('farmers')
             .update(updateData)
             .eq('id', id)
-            .select('id, name, full_name, email, mobile, farm_name, location, phone, avatar_url, profile_photo_url, role, created_at, updated_at')
+            .select('id, username, email, mobile, farm_name, farm_size, specialization, village, taluka, district, state, pin_code, profile_photo_url, status, account_verified, created_at, updated_at')
             .single();
 
         if (error) {
@@ -2410,7 +2422,7 @@ app.put('/api/customer/profile/:id', async (req, res) => {
             .from('consumers')
             .update(updateData)
             .eq('id', id)
-            .select('id, name, full_name, email, mobile, phone, avatar_url, profile_photo_url, location, created_at, updated_at')
+            .select('id, username, email, mobile, profile_photo_url, status, created_at, updated_at')
             .single();
 
         if (error) {
