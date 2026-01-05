@@ -1896,8 +1896,10 @@ app.post("/api/products", async (req, res) => {
             unit,
             is_organic = false,
             location,
-            status = "active",
-            fulfillment_status = "not_sent",
+            status = "pending",
+            fulfillment_status = "pending",
+            warehouse_ref_id,
+            sent_to_warehouse_date,
             imageData,
             images = []
         } = req.body;
@@ -1951,6 +1953,8 @@ app.post("/api/products", async (req, res) => {
                 location,
                 status,
                 fulfillment_status,
+                warehouse_ref_id,
+                sent_to_warehouse_date,
                 image_url: imagesToStore, // Store as array
                 is_active: true,
                 created_at: new Date().toISOString()
@@ -1989,6 +1993,17 @@ app.put("/api/products/:id", async (req, res) => {
     try {
         const { id } = req.params;
         const { imageData, images = [], ...otherFields } = req.body;
+
+        // Check if this is a warehouse shipment update
+        if (otherFields.status === 'sent' || otherFields.fulfillment_status === 'in-transit') {
+            console.log('📦 Warehouse Shipment Update:', {
+                productId: id,
+                warehouseRefId: otherFields.warehouse_ref_id,
+                status: otherFields.status,
+                fulfillmentStatus: otherFields.fulfillment_status,
+                sentDate: otherFields.sent_to_warehouse_date
+            });
+        }
 
         const updateObj = {
             ...otherFields,
@@ -3118,8 +3133,13 @@ app.listen(PORT, async () => {
        POST /api/login                 - User login (POST)
        GET  /api/products              - Get all products (with filters)
        POST /api/products              - Create new product with images
+                                        Fields: farmer_id, name, description, category, price, stock, unit
+                                        Optional: status (default: pending), fulfillment_status (default: pending)
+                                        Warehouse fields: warehouse_ref_id, sent_to_warehouse_date
        GET  /api/products/:id          - Get single product by ID
-       PUT  /api/products/:id          - Update product
+       PUT  /api/products/:id          - Update product (supports warehouse shipment)
+                                        Warehouse Update: status='sent', fulfillment_status='in-transit'
+                                        warehouse_ref_id (format: WH-timestamp-randomId)
        DELETE /api/products/:id        - Delete product
        GET  /api/public/products       - Public products for consumers
        GET  /api/public/products/:id   - Public single product
