@@ -2289,6 +2289,75 @@ app.get('/api/tours', async (req, res) => {
     }
 });
 
+// Create a tour
+app.post('/api/tours', async (req, res) => {
+    try {
+        const {
+            farmer_id,
+            name,
+            description,
+            duration_hours,
+            price_per_person,
+            max_group_size,
+            is_active = true
+        } = req.body;
+
+        if (!farmer_id || !name) {
+            return res.status(400).json({
+                success: false,
+                message: 'farmer_id and name are required'
+            });
+        }
+
+        const payload = {
+            farmer_id,
+            name,
+            description: description || null,
+            duration_hours: duration_hours !== undefined ? parseInt(duration_hours, 10) : null,
+            price_per_person: price_per_person !== undefined ? parseFloat(price_per_person) : null,
+            max_group_size: max_group_size !== undefined ? parseInt(max_group_size, 10) : null,
+            is_active: is_active !== undefined ? !!is_active : true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+
+        const { data, error } = await supabase
+            .from('tours')
+            .insert([payload])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('❌ Error creating tour:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to create tour',
+                error: error.message
+            });
+        }
+
+        const normalized = {
+            ...data,
+            title: data.name,
+            price: data.price_per_person,
+            duration: data.duration_hours ? `${data.duration_hours} hours` : ''
+        };
+
+        console.log('✅ Tour created successfully');
+        return res.json({
+            success: true,
+            tour: normalized
+        });
+    } catch (error) {
+        console.error('❌ Unexpected error in create tour:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+});
+
 // ==================== PROFILE ENDPOINTS ====================
 
 // GET farmer profile by ID
