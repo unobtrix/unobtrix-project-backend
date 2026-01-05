@@ -2387,6 +2387,271 @@ app.post('/api/tours', async (req, res) => {
     }
 });
 
+// Get single tour by ID
+app.get('/api/tours/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        console.log(`🎢 Fetching tour ${id}...`);
+
+        const { data: tour, error } = await supabase
+            .from('tours')
+            .select(`*, farmers (id, username, email, mobile, farm_name)`)
+            .eq('id', id)
+            .eq('is_active', true)
+            .single();
+
+        if (error) {
+            console.error('❌ Error fetching tour:', error);
+            return res.status(500).json({ 
+                success: false,
+                message: 'Failed to fetch tour',
+                error: error.message 
+            });
+        }
+
+        if (!tour) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Tour not found' 
+            });
+        }
+
+        const normalized = {
+            ...tour,
+            title: tour.name,
+            price: tour.price_per_person,
+            duration: tour.duration_hours ? `${tour.duration_hours} hours` : '',
+            image_url: Array.isArray(tour.tour_url) ? (tour.tour_url[0] || '') : (tour.tour_url || ''),
+            tour_url: Array.isArray(tour.tour_url) ? tour.tour_url : (tour.tour_url ? [tour.tour_url] : [])
+        };
+
+        console.log(`✅ Found tour: ${tour.name}`);
+        return res.json({
+            success: true,
+            tour: normalized
+        });
+
+    } catch (error) {
+        console.error('❌ Unexpected error in tour endpoint:', error);
+        return res.status(500).json({ 
+            success: false,
+            message: 'Internal server error',
+            error: error.message 
+        });
+    }
+});
+
+// Update tour by ID
+app.put('/api/tours/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            name,
+            description,
+            duration_hours,
+            price_per_person,
+            max_group_size,
+            is_active,
+            images = [],
+            tour_url = []
+        } = req.body;
+
+        console.log(`🎢 Updating tour ${id}...`);
+
+        // Build update payload with only provided fields
+        const updatePayload = {
+            updated_at: new Date().toISOString()
+        };
+
+        if (name !== undefined) updatePayload.name = name;
+        if (description !== undefined) updatePayload.description = description;
+        if (duration_hours !== undefined) updatePayload.duration_hours = parseInt(duration_hours, 10);
+        if (price_per_person !== undefined) updatePayload.price_per_person = parseFloat(price_per_person);
+        if (max_group_size !== undefined) updatePayload.max_group_size = parseInt(max_group_size, 10);
+        if (is_active !== undefined) updatePayload.is_active = !!is_active;
+
+        // Handle images if provided
+        if (Array.isArray(images) && images.length > 0) {
+            const uploadedTourUrls = [];
+            for (const img of images) {
+                if (typeof img === 'string' && img.startsWith('data:image/')) {
+                    // Get farmer_id from the tour first
+                    const { data: tourData } = await supabase
+                        .from('tours')
+                        .select('farmer_id')
+                        .eq('id', id)
+                        .single();
+                    
+                    const url = await uploadProductImage(img, tourData?.farmer_id || 'unknown');
+                    if (url) uploadedTourUrls.push(url);
+                } else if (typeof img === 'string') {
+                    uploadedTourUrls.push(img);
+                }
+            }
+            if (uploadedTourUrls.length > 0) {
+                updatePayload.tour_url = uploadedTourUrls;
+            }
+        }
+
+        // Merge with any direct tour_url array passed
+        if (Array.isArray(tour_url) && tour_url.length > 0) {
+            const existingUrls = updatePayload.tour_url || [];
+            for (const url of tour_url) {
+                if (typeof url === 'string' && url.trim()) {
+                    existingUrls.push(url.trim());
+                }
+            }
+            updatePayload.tour_url = existingUrls;
+        }
+
+        const { data, error } = await supabase
+            .from('tours')
+            .update(updatePayload)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('❌ Update error:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to update tour',
+                error: error.message
+            });
+        }
+
+        const normalized = {
+            ...data,
+            title: data.name,
+            price: data.price_per_person,
+            duration: data.duration_hours ? `${data.duration_hours} hours` : '',
+            image_url: Array.isArray(data.tour_url) ? (data.tour_url[0] || '') : (data.tour_url || ''),
+            tour_url: Array.isArray(data.tour_url) ? data.tour_url : (data.tour_url ? [data.tour_url] : [])
+        };
+
+        console.log('✅ Tour updated successfully');
+        return res.json({
+            success: true,
+            message: 'Tour updated successfully',
+            tour: normalized
+        });
+
+    } catch (error) {
+        console.error('❌ PUT /api/tours/:id error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to update tour',
+            error: error.message
+        });
+    }
+});
+
+// Delete tour by ID
+app.delete('/api/tours/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        console.log(`🎢 Deleting tour ${id}...`);
+
+        // Soft delete by setting is_active to false
+        const { data, error } = await supabase
+            .from('tours')
+            .update({ 
+                is_active: false,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('❌ Delete error:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to delete tour',
+                error: error.message
+            });
+        }
+
+        if (!data) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tour not found'
+            });
+        }
+
+        console.log('✅ Tour deleted successfully');
+        return res.json({
+            success: true,
+            message: 'Tour deleted successfully'
+        });
+
+    } catch (error) {
+        console.error('❌ DELETE /api/tours/:id error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to delete tour',
+            error: error.message
+        });
+    }
+});
+
+// ==================== TOUR BOOKINGS ENDPOINT ====================
+app.get('/api/tour-bookings', async (req, res) => {
+    try {
+        const { farmer_id, limit = 20, offset = 0 } = req.query;
+        console.log('📅 Fetching tour bookings...');
+
+        let query = supabase
+            .from('tour_bookings')
+            .select(`
+                *,
+                tours!inner(id, name, farmer_id),
+                consumers(id, username, email, mobile)
+            `)
+            .order('created_at', { ascending: false })
+            .range(offset, offset + parseInt(limit) - 1);
+
+        // Filter by farmer_id if provided
+        if (farmer_id) {
+            query = query.eq('tours.farmer_id', farmer_id);
+        }
+
+        const { data: bookings, error } = await query;
+
+        if (error) {
+            console.error('❌ Error fetching tour bookings:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to fetch tour bookings',
+                error: error.message
+            });
+        }
+
+        // Normalize the data
+        const normalizedBookings = (bookings || []).map(booking => ({
+            ...booking,
+            tour_name: booking.tours?.name || 'Tour',
+            customer_name: booking.consumers?.username || 'Guest',
+            customer: booking.consumers
+        }));
+
+        console.log(`✅ Found ${bookings?.length || 0} tour bookings`);
+        return res.json({
+            success: true,
+            bookings: normalizedBookings,
+            count: bookings?.length || 0
+        });
+
+    } catch (error) {
+        console.error('❌ Unexpected error in tour bookings endpoint:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+});
+
 // ==================== PROFILE ENDPOINTS ====================
 
 // GET farmer profile by ID
