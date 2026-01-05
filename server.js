@@ -1804,10 +1804,10 @@ app.get('/api/products', async (req, res) => {
 
         console.log(`✅ Found ${products?.length || 0} products`);
         
-        // Normalize image_url (TEXT[] in DB) to a single URL for the frontend
+        // Keep image_url as array if it's an array, otherwise convert to array
         const normalizedProducts = (products || []).map(p => ({
             ...p,
-            image_url: Array.isArray(p.image_url) ? (p.image_url[0] || '') : (p.image_url || ''),
+            image_url: Array.isArray(p.image_url) ? p.image_url : (p.image_url ? [p.image_url] : []),
         }));
 
         res.json({
@@ -1866,7 +1866,7 @@ app.get('/api/products/:id', async (req, res) => {
         
         const normalizedProduct = {
             ...product,
-            image_url: Array.isArray(product.image_url) ? (product.image_url[0] || '') : (product.image_url || ''),
+            image_url: Array.isArray(product.image_url) ? product.image_url : (product.image_url ? [product.image_url] : []),
         };
         
         res.json({
