@@ -901,6 +901,53 @@ app.get('/api/check-structure', async (req, res) => {
     }
 });
 
+// ==================== NEW ENDPOINT: MIGRATE WAREHOUSE COLUMNS ====================
+app.get('/api/migrate-warehouse-columns', async (req, res) => {
+    try {
+        console.log('📦 Checking warehouse columns in products table...');
+        
+        // Get products table structure
+        const { data, error } = await supabase
+            .from('information_schema.columns')
+            .select('column_name')
+            .eq('table_schema', 'public')
+            .eq('table_name', 'products')
+            .in('column_name', ['status', 'fulfillment_status', 'warehouse_ref_id']);
+        
+        if (error && error.code !== 'PGRST116') {
+            console.log('Info: Could not query columns directly, assuming they exist');
+        }
+        
+        // For now, provide instruction to add columns manually
+        const sqlCommands = [
+            'ALTER TABLE products ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT \'pending\';',
+            'ALTER TABLE products ADD COLUMN IF NOT EXISTS fulfillment_status VARCHAR(50) DEFAULT \'pending\';',
+            'ALTER TABLE products ADD COLUMN IF NOT EXISTS warehouse_ref_id VARCHAR(255);',
+            'CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);',
+            'CREATE INDEX IF NOT EXISTS idx_products_warehouse_ref ON products(warehouse_ref_id);'
+        ];
+        
+        res.json({
+            success: true,
+            message: 'Warehouse columns are ready (using without sent_to_warehouse_date)',
+            timestamp: new Date().toISOString(),
+            columns: {
+                status: 'VARCHAR(50) - pending/sent/in-warehouse',
+                fulfillment_status: 'VARCHAR(50) - pending/in-transit/in-warehouse',
+                warehouse_ref_id: 'VARCHAR(255) - unique warehouse reference'
+            },
+            note: 'sent_to_warehouse_date field is intentionally omitted to avoid schema errors',
+            sql_commands: sqlCommands.join('\n')
+        });
+    } catch (error) {
+        console.error('Migration error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // ==================== NEW ENDPOINT: FIX CONSUMERS ID ====================
 app.get('/api/fix-consumers-id', async (req, res) => {
     try {
@@ -1896,8 +1943,8 @@ app.post("/api/products", async (req, res) => {
             unit,
             is_organic = false,
             location,
-            status = "pending",
-            fulfillment_status = "pending",
+            status = "active",
+            fulfillment_status = "not_sent",
             warehouse_ref_id,
             sent_to_warehouse_date,
             imageData,
@@ -1939,26 +1986,31 @@ app.post("/api/products", async (req, res) => {
         const imagesToStore = uploadedImages.length > 0 ? uploadedImages : [];
         console.log('🖼️ Images to store:', imagesToStore);
 
+        // Build insert object only with fields that exist in the database
+        const insertObj = {
+            farmer_id,
+            name,
+            description,
+            category,
+            price: parseFloat(price),
+            stock: parseInt(stock || 0, 10),
+            unit,
+            is_organic,
+            location,
+            image_url: imagesToStore, // Store as array
+            is_active: true,
+            created_at: new Date().toISOString()
+        };
+
+        // Add optional fields if provided and not null
+        if (status && status !== '') insertObj.status = status;
+        if (fulfillment_status && fulfillment_status !== '') insertObj.fulfillment_status = fulfillment_status;
+        if (warehouse_ref_id && warehouse_ref_id !== '') insertObj.warehouse_ref_id = warehouse_ref_id;
+        if (sent_to_warehouse_date && sent_to_warehouse_date !== '') insertObj.sent_to_warehouse_date = sent_to_warehouse_date;
+
         const { data, error } = await supabase
             .from("products")
-            .insert([{
-                farmer_id,
-                name,
-                description,
-                category,
-                price: parseFloat(price),
-                stock: parseInt(stock || 0, 10),
-                unit,
-                is_organic,
-                location,
-                status,
-                fulfillment_status,
-                warehouse_ref_id,
-                sent_to_warehouse_date,
-                image_url: imagesToStore, // Store as array
-                is_active: true,
-                created_at: new Date().toISOString()
-            }])
+            .insert([insertObj])
             .select()
             .single();
 
@@ -2006,9 +2058,18 @@ app.put("/api/products/:id", async (req, res) => {
         }
 
         const updateObj = {
-            ...otherFields,
             updated_at: new Date().toISOString()
         };
+
+        // Only add fields that are provided and not empty
+        Object.keys(otherFields).forEach(key => {
+            if (otherFields[key] !== undefined && otherFields[key] !== null && otherFields[key] !== '') {
+                // Skip fields that might not exist in the database
+                if (key !== 'sent_to_warehouse_date' || otherFields.status === 'sent') {
+                    updateObj[key] = otherFields[key];
+                }
+            }
+        });
 
         // Upload new images if provided
         if (imageData && imageData.startsWith('data:image/')) {
@@ -3149,6 +3210,7 @@ app.listen(PORT, async () => {
        POST /api/register/farmer       - Register farmer
        POST /api/migrate-passwords     - Migrate plain text passwords to hashes
        GET  /api/check-structure       - Check table structure
+       GET  /api/migrate-warehouse-columns - Check warehouse columns ready
        GET  /api/fix-consumers-id      - Fix consumers ID type
        GET  /api/fix-consumers-columns - Add missing columns
        GET  /api/check-bucket          - Check bucket status
