@@ -2263,6 +2263,8 @@ app.get('/api/tours', async (req, res) => {
             title: t.name,
             price: t.price_per_person,
             duration: t.duration_hours ? `${t.duration_hours} hours` : '',
+            image_url: Array.isArray(t.tour_url) ? (t.tour_url[0] || '') : (t.tour_url || ''),
+            tour_url: Array.isArray(t.tour_url) ? t.tour_url : (t.tour_url ? [t.tour_url] : [])
         }));
 
         res.json({
@@ -2299,7 +2301,9 @@ app.post('/api/tours', async (req, res) => {
             duration_hours,
             price_per_person,
             max_group_size,
-            is_active = true
+            is_active = true,
+            images = [],
+            tour_url = []
         } = req.body;
 
         if (!farmer_id || !name) {
@@ -2307,6 +2311,28 @@ app.post('/api/tours', async (req, res) => {
                 success: false,
                 message: 'farmer_id and name are required'
             });
+        }
+
+        // Upload images if provided (base64 or URLs)
+        const uploadedTourUrls = [];
+        if (Array.isArray(images) && images.length > 0) {
+            for (const img of images) {
+                if (typeof img === 'string' && img.startsWith('data:image/')) {
+                    const url = await uploadProductImage(img, farmer_id);
+                    if (url) uploadedTourUrls.push(url);
+                } else if (typeof img === 'string') {
+                    uploadedTourUrls.push(img);
+                }
+            }
+        }
+
+        // Merge with any direct tour_url array passed
+        if (Array.isArray(tour_url) && tour_url.length > 0) {
+            for (const url of tour_url) {
+                if (typeof url === 'string' && url.trim()) {
+                    uploadedTourUrls.push(url.trim());
+                }
+            }
         }
 
         const payload = {
@@ -2317,6 +2343,7 @@ app.post('/api/tours', async (req, res) => {
             price_per_person: price_per_person !== undefined ? parseFloat(price_per_person) : null,
             max_group_size: max_group_size !== undefined ? parseInt(max_group_size, 10) : null,
             is_active: is_active !== undefined ? !!is_active : true,
+            tour_url: uploadedTourUrls,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
@@ -2340,7 +2367,9 @@ app.post('/api/tours', async (req, res) => {
             ...data,
             title: data.name,
             price: data.price_per_person,
-            duration: data.duration_hours ? `${data.duration_hours} hours` : ''
+            duration: data.duration_hours ? `${data.duration_hours} hours` : '',
+            image_url: Array.isArray(data.tour_url) ? (data.tour_url[0] || '') : (data.tour_url || ''),
+            tour_url: Array.isArray(data.tour_url) ? data.tour_url : (data.tour_url ? [data.tour_url] : [])
         };
 
         console.log('✅ Tour created successfully');
