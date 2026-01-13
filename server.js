@@ -15,16 +15,28 @@ async function sendOTPEmail(email, otp) {
     try {
         console.log(`📧 Attempting to send OTP to ${email} via Resend...`);
         
+        // For Resend free tier: send to verified email only
+        const toEmail = process.env.RESEND_VERIFIED_EMAIL || 'unobtrix1@gmail.com';
+        const isTestMode = email !== toEmail;
+        
+        if (isTestMode) {
+            console.log(`⚠️ Test mode: Sending to ${toEmail} instead of ${email}`);
+        }
+        
         const result = await resend.emails.send({
             from: 'Ximfy <onboarding@resend.dev>',
-            to: email,
-            subject: 'Ximfy - Your Email Verification Code',
+            to: toEmail,
+            subject: isTestMode ? `[TEST for ${email}] Ximfy - Email Verification Code` : 'Ximfy - Your Email Verification Code',
             html: `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                     <div style="background: linear-gradient(135deg, #108f386d, #0972209c); padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
                         <img src="https://ribehublefecccabzwkv.supabase.co/storage/v1/object/sign/assets/ximfy%20(1).png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8xNzY4NzkxOC1hNjdkLTQ3MTItYjlmZi1jYzBiNTBkM2JmOTciLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJhc3NldHMveGltZnkgKDEpLnBuZyIsImlhdCI6MTc2Nzg1NTEzNSwiZXhwIjozMTU1MzY3ODU1MTM1fQ.d53c3b9ER-846cAb4nhOcLp5nqhFITCmh4tNmCz5r24" alt="Ximfy" style="height: 50px; margin: 0;">
                     </div>
                     <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+                        ${isTestMode ? `<div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                            <p style="color: #856404; margin: 0; font-weight: bold;">🧪 TEST MODE</p>
+                            <p style="color: #856404; margin: 5px 0 0 0; font-size: 14px;">This OTP is for: ${email}</p>
+                        </div>` : ''}
                         <h2 style="color: #2e7d32; margin-top: 0;">Email Verification Code</h2>
                         <p style="color: #666; font-size: 16px;">Thank you for signing up with Ximfy!</p>
                         <p style="color: #666; font-size: 16px;">Your email verification code is:</p>
@@ -45,7 +57,7 @@ async function sendOTPEmail(email, otp) {
             return { success: false, error: result.error.message };
         }
 
-        console.log(`✅ Email sent successfully via Resend to ${email}. ID: ${result.data.id}`);
+        console.log(`✅ Email sent successfully via Resend to ${toEmail}. ID: ${result.data.id}`);
         return { success: true, messageId: result.data.id };
     } catch (error) {
         console.error('❌ Error sending OTP email via Resend:', error);
