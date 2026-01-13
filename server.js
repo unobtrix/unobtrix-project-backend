@@ -9,6 +9,14 @@ require('dotenv').config();
 const app = express();
 
 // ==================== BREVO EMAIL CONFIGURATION ====================
+// Verify API key is available
+if (!process.env.BREVO_API_KEY) {
+    console.error('❌ ERROR: BREVO_API_KEY is not set in environment variables!');
+    console.error('Set BREVO_API_KEY in your .env or Render environment variables');
+} else {
+    console.log('✅ BREVO_API_KEY is configured');
+}
+
 const defaultClient = SibApiV3Sdk.ApiClient.instance;
 const apiKey = defaultClient.authentications['api-key'];
 apiKey.apiKey = process.env.BREVO_API_KEY;
@@ -18,6 +26,7 @@ const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 async function sendOTPEmail(email, otp) {
     try {
         console.log(`📧 Attempting to send OTP to ${email} via Brevo...`);
+        console.log(`🔑 Using API Key: ${process.env.BREVO_API_KEY ? 'SET' : 'NOT SET'}`);
         
         const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
         sendSmtpEmail.sender = { name: 'Ximfy', email: 'unobtrix1@gmail.com' };
