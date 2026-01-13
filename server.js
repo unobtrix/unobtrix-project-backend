@@ -1336,6 +1336,116 @@ app.post('/api/aadhaar/verify', (req, res) => {
     }
 });
 
+// ==================== EMAIL OTP ENDPOINTS ====================
+app.post('/api/email/send-otp', async (req, res) => {
+    try {
+        const { email, userType } = req.body;
+        
+        console.log(`📧 Email OTP request for: ${email} (${userType})`);
+        
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Valid email address is required' 
+            });
+        }
+        
+        const otp = generateOTP();
+        const expiryTime = Date.now() + 10 * 60 * 1000;
+        
+        otpStore.set(`email_${email}`, { 
+            otp, 
+            expiry: expiryTime,
+            created: new Date().toISOString(),
+            userType: userType || 'unknown'
+        });
+        
+        const emailResult = await sendOTPEmail(email, otp);
+        
+        if (!emailResult.success) {
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Failed to send OTP email. Please try again.',
+                error: emailResult.error
+            });
+        }
+        
+        console.log(`✅ Email OTP ${otp} sent to ${email}`);
+        
+        return res.json({
+            success: true,
+            message: 'OTP sent successfully to your email',
+            otp: otp,
+            debug_otp: otp,
+            expiry: '10 minutes',
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ Error generating Email OTP:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to send OTP. Please try again.',
+            error: error.message 
+        });
+    }
+});
+
+app.post('/api/email/verify', (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        
+        console.log(`📧 Email OTP verification for: ${email}`);
+        
+        if (!email || !otp) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Email and OTP are required' 
+            });
+        }
+        
+        const storedData = otpStore.get(`email_${email}`);
+        
+        if (!storedData) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'No OTP found for this email. Please request a new OTP.' 
+            });
+        }
+        
+        if (Date.now() > storedData.expiry) {
+            otpStore.delete(`email_${email}`);
+            return res.status(400).json({ 
+                success: false, 
+                message: 'OTP has expired. Please request a new OTP.' 
+            });
+        }
+        
+        if (storedData.otp !== otp) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Invalid OTP. Please check and try again.' 
+            });
+        }
+        
+        otpStore.delete(`email_${email}`);
+        
+        res.json({
+            success: true,
+            message: 'Email verified successfully!',
+            verifiedAt: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ Error verifying Email OTP:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to verify OTP. Please try again.',
+            error: error.message 
+        });
+    }
+});
+
 // ==================== PHOTO UPLOAD ENDPOINT ====================
 app.post('/api/upload-photo', async (req, res) => {
     try {
