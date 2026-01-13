@@ -3,9 +3,65 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
+
+// ==================== NODEMAILER CONFIGURATION ====================
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: 'unobtrix1@gmail.com',
+        pass: 'lnfr tqop yocu reya'
+    }
+});
+
+// Test the transporter connection
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ Email transporter error:', error);
+    } else {
+        console.log('✅ Email transporter ready');
+    }
+});
+
+async function sendOTPEmail(email, otp) {
+    try {
+        const mailOptions = {
+            from: 'unobtrix1@gmail.com',
+            to: email,
+            subject: 'Ximfy - Your Email Verification Code',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #108f386d, #0972209c); padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                        <img src="https://ribehublefecccabzwkv.supabase.co/storage/v1/object/sign/assets/ximfy%20(1).png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8xNzY4NzkxOC1hNjdkLTQ3MTItYjlmZi1jYzBiNTBkM2JmOTciLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJhc3NldHMveGltZnkgKDEpLnBuZyIsImlhdCI6MTc2Nzg1NTEzNSwiZXhwIjozMTU1MzY3ODU1MTM1fQ.d53c3b9ER-846cAb4nhOcLp5nqhFITCmh4tNmCz5r24" alt="Ximfy" style="height: 50px; margin: 0;">
+                    </div>
+                    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+                        <h2 style="color: #2e7d32; margin-top: 0;">Email Verification Code</h2>
+                        <p style="color: #666; font-size: 16px;">Thank you for signing up with Ximfy!</p>
+                        <p style="color: #666; font-size: 16px;">Your email verification code is:</p>
+                        <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+                            <p style="font-size: 32px; font-weight: bold; color: #2e7d32; margin: 0; letter-spacing: 5px;">${otp}</p>
+                        </div>
+                        <p style="color: #999; font-size: 14px;">This code will expire in 10 minutes.</p>
+                        <p style="color: #999; font-size: 14px;">If you didn't request this code, please ignore this email.</p>
+                        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                        <p style="color: #999; font-size: 12px; text-align: center;">© 2024 Ximfy. All rights reserved.</p>
+                    </div>
+                </div>
+            `
+        };
+
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`✅ OTP email sent to ${email}`);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error('❌ Error sending OTP email:', error);
+        return { success: false, error: error.message };
+    }
+}
+// =====================================================================
 
 // ==================== SUPABASE CONFIGURATION ====================
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -1236,6 +1292,116 @@ app.post('/api/aadhaar/verify', (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Failed to verify Aadhaar OTP. Please try again.',
+            error: error.message 
+        });
+    }
+});
+
+// ==================== EMAIL OTP ENDPOINTS ====================
+app.post('/api/email/send-otp', async (req, res) => {
+    try {
+        const { email, userType } = req.body;
+        
+        console.log(`📧 Email OTP request for: ${email} (${userType})`);
+        
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Valid email address is required' 
+            });
+        }
+        
+        const otp = generateOTP();
+        const expiryTime = Date.now() + 10 * 60 * 1000;
+        
+        otpStore.set(`email_${email}`, { 
+            otp, 
+            expiry: expiryTime,
+            created: new Date().toISOString(),
+            userType: userType || 'unknown'
+        });
+        
+        const emailResult = await sendOTPEmail(email, otp);
+        
+        if (!emailResult.success) {
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Failed to send OTP email. Please try again.',
+                error: emailResult.error
+            });
+        }
+        
+        console.log(`✅ Email OTP ${otp} sent to ${email}`);
+        
+        return res.json({
+            success: true,
+            message: 'OTP sent successfully to your email',
+            otp: otp,
+            debug_otp: otp,
+            expiry: '10 minutes',
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ Error generating Email OTP:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to send OTP. Please try again.',
+            error: error.message 
+        });
+    }
+});
+
+app.post('/api/email/verify', (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        
+        console.log(`📧 Email OTP verification for: ${email}`);
+        
+        if (!email || !otp) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Email and OTP are required' 
+            });
+        }
+        
+        const storedData = otpStore.get(`email_${email}`);
+        
+        if (!storedData) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'No OTP found for this email. Please request a new OTP.' 
+            });
+        }
+        
+        if (Date.now() > storedData.expiry) {
+            otpStore.delete(`email_${email}`);
+            return res.status(400).json({ 
+                success: false, 
+                message: 'OTP has expired. Please request a new OTP.' 
+            });
+        }
+        
+        if (storedData.otp !== otp) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Invalid OTP. Please check and try again.' 
+            });
+        }
+        
+        otpStore.delete(`email_${email}`);
+        
+        res.json({
+            success: true,
+            message: 'Email verified successfully!',
+            verifiedAt: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ Error verifying Email OTP:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to verify OTP. Please try again.',
             error: error.message 
         });
     }
