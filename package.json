@@ -30,6 +30,7 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.7",
     "resend": "^6.7.0",
+    "sib-api-v3-sdk": "^8.5.0",
     "twilio": "^4.19.3"
   },
   "devDependencies": {

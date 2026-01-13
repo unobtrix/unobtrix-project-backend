@@ -3,65 +3,52 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
-const { Resend } = require('resend');
+const SibApiV3Sdk = require('sib-api-v3-sdk');
 require('dotenv').config();
 
 const app = express();
 
-// ==================== RESEND EMAIL CONFIGURATION ====================
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ==================== BREVO EMAIL CONFIGURATION ====================
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+const apiKey = defaultClient.authentications['api-key'];
+apiKey.apiKey = process.env.BREVO_API_KEY;
+
+const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
 async function sendOTPEmail(email, otp) {
     try {
-        console.log(`📧 Attempting to send OTP to ${email} via Resend...`);
+        console.log(`📧 Attempting to send OTP to ${email} via Brevo...`);
         
-        // For Resend free tier: send to verified email only
-        const toEmail = process.env.RESEND_VERIFIED_EMAIL || 'unobtrix1@gmail.com';
-        const isTestMode = email !== toEmail;
-        
-        if (isTestMode) {
-            console.log(`⚠️ Test mode: Sending to ${toEmail} instead of ${email}`);
-        }
-        
-        const result = await resend.emails.send({
-            from: 'Ximfy <onboarding@resend.dev>',
-            to: toEmail,
-            subject: isTestMode ? `[TEST for ${email}] Ximfy - Email Verification Code` : 'Ximfy - Your Email Verification Code',
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <div style="background: linear-gradient(135deg, #108f386d, #0972209c); padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
-                        <img src="https://ribehublefecccabzwkv.supabase.co/storage/v1/object/sign/assets/ximfy%20(1).png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8xNzY4NzkxOC1hNjdkLTQ3MTItYjlmZi1jYzBiNTBkM2JmOTciLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJhc3NldHMveGltZnkgKDEpLnBuZyIsImlhdCI6MTc2Nzg1NTEzNSwiZXhwIjozMTU1MzY3ODU1MTM1fQ.d53c3b9ER-846cAb4nhOcLp5nqhFITCmh4tNmCz5r24" alt="Ximfy" style="height: 50px; margin: 0;">
-                    </div>
-                    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-                        ${isTestMode ? `<div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
-                            <p style="color: #856404; margin: 0; font-weight: bold;">🧪 TEST MODE</p>
-                            <p style="color: #856404; margin: 5px 0 0 0; font-size: 14px;">This OTP is for: ${email}</p>
-                        </div>` : ''}
-                        <h2 style="color: #2e7d32; margin-top: 0;">Email Verification Code</h2>
-                        <p style="color: #666; font-size: 16px;">Thank you for signing up with Ximfy!</p>
-                        <p style="color: #666; font-size: 16px;">Your email verification code is:</p>
-                        <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-                            <p style="font-size: 32px; font-weight: bold; color: #2e7d32; margin: 0; letter-spacing: 5px;">${otp}</p>
-                        </div>
-                        <p style="color: #999; font-size: 14px;">This code will expire in 10 minutes.</p>
-                        <p style="color: #999; font-size: 14px;">If you didn't request this code, please ignore this email.</p>
-                        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-                        <p style="color: #999; font-size: 12px; text-align: center;">© 2024 Ximfy. All rights reserved.</p>
-                    </div>
+        const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
+        sendSmtpEmail.sender = { name: 'Ximfy', email: 'unobtrix1@gmail.com' };
+        sendSmtpEmail.to = [{ email: email }];
+        sendSmtpEmail.subject = 'Ximfy - Your Email Verification Code';
+        sendSmtpEmail.htmlContent = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: linear-gradient(135deg, #108f386d, #0972209c); padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <img src="https://ribehublefecccabzwkv.supabase.co/storage/v1/object/sign/assets/ximfy%20(1).png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8xNzY4NzkxOC1hNjdkLTQ3MTItYjlmZi1jYzBiNTBkM2JmOTciLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJhc3NldHMveGltZnkgKDEpLnBuZyIsImlhdCI6MTc2Nzg1NTEzNSwiZXhwIjozMTU1MzY3ODU1MTM1fQ.d53c3b9ER-846cAb4nhOcLp5nqhFITCmh4tNmCz5r24" alt="Ximfy" style="height: 50px; margin: 0;">
                 </div>
-            `
-        });
+                <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+                    <h2 style="color: #2e7d32; margin-top: 0;">Email Verification Code</h2>
+                    <p style="color: #666; font-size: 16px;">Thank you for signing up with Ximfy!</p>
+                    <p style="color: #666; font-size: 16px;">Your email verification code is:</p>
+                    <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+                        <p style="font-size: 32px; font-weight: bold; color: #2e7d32; margin: 0; letter-spacing: 5px;">${otp}</p>
+                    </div>
+                    <p style="color: #999; font-size: 14px;">This code will expire in 10 minutes.</p>
+                    <p style="color: #999; font-size: 14px;">If you didn't request this code, please ignore this email.</p>
+                    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                    <p style="color: #999; font-size: 12px; text-align: center;">© 2024 Ximfy. All rights reserved.</p>
+                </div>
+            </div>
+        `;
 
-        if (result.error) {
-            console.error('❌ Resend error:', result.error);
-            return { success: false, error: result.error.message };
-        }
-
-        console.log(`✅ Email sent successfully via Resend to ${toEmail}. ID: ${result.data.id}`);
-        return { success: true, messageId: result.data.id };
+        const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+        console.log(`✅ Email sent successfully via Brevo to ${email}. Message ID: ${result.messageId}`);
+        return { success: true, messageId: result.messageId };
     } catch (error) {
-        console.error('❌ Error sending OTP email via Resend:', error);
-        return { success: false, error: error.message };
+        console.error('❌ Error sending OTP email via Brevo:', error);
+        return { success: false, error: error.message || 'Failed to send email' };
     }
 }
 // =====================================================================
