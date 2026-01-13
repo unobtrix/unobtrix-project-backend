@@ -3,77 +3,9 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
-
-// ==================== NODEMAILER CONFIGURATION ====================
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: {
-        user: process.env.EMAIL_USER || 'unobtrix1@gmail.com',
-        pass: process.env.EMAIL_PASSWORD || 'lnfrtqopyocureya'
-    },
-    connectionTimeout: 10000,
-    socketTimeout: 10000,
-    pool: {
-        maxConnections: 5,
-        maxMessages: 100,
-        rateDelta: 4000,
-        rateLimit: 14
-    }
-});
-
-// Test the transporter connection
-transporter.verify((error, success) => {
-    if (error) {
-        console.error('❌ Email transporter error:', error);
-        console.error('📧 Make sure your .env has EMAIL_USER and EMAIL_PASSWORD set');
-    } else {
-        console.log('✅ Email transporter ready - SMTP connected successfully');
-    }
-});
-
-async function sendOTPEmail(email, otp) {
-    try {
-        const mailOptions = {
-            from: process.env.EMAIL_USER || 'unobtrix1@gmail.com',
-            to: email,
-            subject: 'Ximfy - Your Email Verification Code',
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <div style="background: linear-gradient(135deg, #108f386d, #0972209c); padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
-                        <img src="https://ribehublefecccabzwkv.supabase.co/storage/v1/object/sign/assets/ximfy%20(1).png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV8xNzY4NzkxOC1hNjdkLTQ3MTItYjlmZi1jYzBiNTBkM2JmOTciLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJhc3NldHMveGltZnkgKDEpLnBuZyIsImlhdCI6MTc2Nzg1NTEzNSwiZXhwIjozMTU1MzY3ODU1MTM1fQ.d53c3b9ER-846cAb4nhOcLp5nqhFITCmh4tNmCz5r24" alt="Ximfy" style="height: 50px; margin: 0;">
-                    </div>
-                    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-                        <h2 style="color: #2e7d32; margin-top: 0;">Email Verification Code</h2>
-                        <p style="color: #666; font-size: 16px;">Thank you for signing up with Ximfy!</p>
-                        <p style="color: #666; font-size: 16px;">Your email verification code is:</p>
-                        <div style="background: #e8f5e9; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-                            <p style="font-size: 32px; font-weight: bold; color: #2e7d32; margin: 0; letter-spacing: 5px;">${otp}</p>
-                        </div>
-                        <p style="color: #999; font-size: 14px;">This code will expire in 10 minutes.</p>
-                        <p style="color: #999; font-size: 14px;">If you didn't request this code, please ignore this email.</p>
-                        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-                        <p style="color: #999; font-size: 12px; text-align: center;">© 2024 Ximfy. All rights reserved.</p>
-                    </div>
-                </div>
-            `
-        };
-
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`✅ OTP email sent to ${email}`);
-        return { success: true, messageId: info.messageId };
-    } catch (error) {
-        console.error('❌ Error sending OTP email:', error);
-        return { success: false, error: error.message };
-    }
-}
-// =====================================================================
 
 // ==================== SUPABASE CONFIGURATION ====================
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -92,7 +24,55 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 console.log('🔗 Supabase connected');
 // ================================================================
 
+// ==================== FIXED AUTH MIDDLEWARE ====================
+function requireAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({
+            success: false,
+            message: 'Missing or invalid Authorization header'
+        });
+    }
+
+    try {
+        const token = authHeader.split(' ')[1].trim();
+
+        const decoded = Buffer.from(token, 'base64').toString('utf-8');
+
+        // STRICT VALIDATION
+        if (!decoded.includes(':')) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid token format'
+            });
+        }
+
+        const [, userId] = decoded.split(':');
+
+        const parsedId = Number(userId);
+
+        if (!Number.isInteger(parsedId)) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid user id in token'
+            });
+        }
+
+        // ✅ GUARANTEED NUMBER
+        req.user = { id: parsedId };
+
+        next();
+    } catch (err) {
+        return res.status(401).json({
+            success: false,
+            message: 'Authentication failed'
+        });
+    }
+}
+
 // ==================== CORS CONFIGURATION ====================
+
 app.use(cors({
     origin: [
         'https://unobtrix1.netlify.app',
@@ -303,13 +283,13 @@ async function checkUserExists(email, mobile) {
 async function checkBucketExists() {
     try {
         console.log('🔍 Checking if storage bucket exists...');
-        
+
         const bucketName = 'profile-photos';
-        
+
         const { data: files, error } = await supabase.storage
             .from(bucketName)
             .list('', { limit: 1 });
-        
+
         if (error) {
             if (error.message && error.message.includes('not found')) {
                 console.error('❌ Bucket "profile-photos" does not exist!');
@@ -323,14 +303,14 @@ async function checkBucketExists() {
                 console.error('\nAfter creating bucket, restart the server.');
                 return false;
             }
-            
+
             console.error('❌ Error accessing bucket:', error.message);
             return false;
         }
-        
+
         console.log('✅ Bucket "profile-photos" exists and is accessible');
         return true;
-        
+
     } catch (error) {
         console.error('❌ Error checking bucket:', error);
         return false;
@@ -341,12 +321,12 @@ async function checkBucketExists() {
 async function uploadToSupabaseStorage(base64Image, userType, userId) {
     try {
         console.log('📤 Starting image upload...');
-        
+
         if (!base64Image) {
             console.error('❌ No image data provided');
             return '';
         }
-        
+
         if (!base64Image.startsWith('data:image/')) {
             console.error('❌ Invalid image format. Must be base64 image data.');
             console.error('Received start:', base64Image.substring(0, 100));
@@ -365,7 +345,7 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
 
         const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
-        
+
         console.log(`📊 Buffer size: ${buffer.length} bytes`);
 
         const { data, error } = await supabase.storage
@@ -395,7 +375,7 @@ async function uploadToSupabaseStorage(base64Image, userType, userId) {
 
         console.log('✅ Upload successful!');
         console.log('📸 Public URL:', publicUrl);
-        
+
         return publicUrl;
 
     } catch (error) {
@@ -469,7 +449,7 @@ async function checkTableStructure() {
         if (consumersData && consumersData.length > 0) {
             const idValue = consumersData[0].id;
             const idType = typeof idValue;
-            
+
             if (idType === 'number' && Number.isInteger(idValue)) {
                 consumersIdType = 'bigint';
             } else if (idType === 'string' && /^\d+$/.test(idValue)) {
@@ -477,7 +457,7 @@ async function checkTableStructure() {
             } else {
                 consumersIdType = idType;
             }
-            
+
             console.log('🆔 Consumers ID sample:', idValue, 'Type:', idType, 'Classified as:', consumersIdType);
         }
 
@@ -511,12 +491,12 @@ async function insertConsumer(userData) {
 
         // CRITICAL FIX: Always ensure profile_photo_url has a non-null value
         let profilePhotoUrl = '';
-        
+
         const photoData = userData.profile_photo_base64 || userData.profile_photo_url;
-        
+
         if (photoData) {
             console.log('📸 Processing profile photo upload to storage...');
-            
+
             if (photoData.startsWith('data:image/')) {
                 console.log('📤 Uploading base64 image to Supabase Storage...');
                 profilePhotoUrl = await uploadToSupabaseStorage(
@@ -586,7 +566,7 @@ async function insertConsumer(userData) {
 async function addMissingColumnToConsumers() {
     try {
         console.log('🔍 Checking consumers table for missing columns...');
-        
+
         const { data, error } = await supabase
             .from('consumers')
             .select('*')
@@ -602,7 +582,7 @@ async function addMissingColumnToConsumers() {
 
         const columns = data && data.length > 0 ? Object.keys(data[0]) : [];
         const missingColumns = [];
-        
+
         if (!columns.includes('profile_photo_url')) {
             missingColumns.push('profile_photo_url');
         }
@@ -643,12 +623,12 @@ async function insertFarmer(farmerData) {
         console.log('📸 Has photo data:', !!farmerData.profile_photo_base64 || !!farmerData.profile_photo_url);
 
         let profilePhotoUrl = '';
-        
+
         const photoData = farmerData.profile_photo_base64 || farmerData.profile_photo_url;
-        
+
         if (photoData) {
             console.log('📸 Processing farmer photo upload...');
-            
+
             if (photoData.startsWith('data:image/')) {
                 profilePhotoUrl = await uploadToSupabaseStorage(
                     photoData,
@@ -784,11 +764,11 @@ app.post('/api/login', async (req, res) => {
         console.log('🔐 LOGIN REQUEST RECEIVED');
         console.log('Request origin:', req.headers.origin);
         console.log('Request body keys:', Object.keys(req.body));
-        
+
         const { email, password, userType = 'consumer' } = req.body;
-        
+
         console.log('🔐 Login attempt for:', email, 'Type:', userType);
-        
+
         if (!email || !password) {
             console.log('❌ Missing email or password');
             return res.status(400).json({
@@ -796,21 +776,21 @@ app.post('/api/login', async (req, res) => {
                 message: 'Email and password are required'
             });
         }
-        
+
         // Determine which table to query
         const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
         console.log('📊 Querying table:', tableName);
-        
+
         // Find user by email
         const { data: users, error: findError } = await supabase
             .from(tableName)
-            .select(userType === 'farmer' 
+            .select(userType === 'farmer'
                 ? 'id, username, email, mobile, password, status, profile_photo_url, farm_name, farm_size, specialization, village, taluka, district, state, pin_code, account_holder_name, bank_name, branch_name'
                 : 'id, username, email, password, status, profile_photo_url'
             )
             .eq('email', email.toLowerCase().trim())
             .limit(1);
-        
+
         if (findError) {
             console.error('❌ Database error:', findError);
             return res.status(500).json({
@@ -819,9 +799,9 @@ app.post('/api/login', async (req, res) => {
                 error: findError.message
             });
         }
-        
+
         console.log('📊 Found users:', users ? users.length : 0);
-        
+
         if (!users || users.length === 0) {
             console.log('❌ User not found:', email);
             console.log('📊 Checked table:', tableName);
@@ -831,14 +811,14 @@ app.post('/api/login', async (req, res) => {
                 debug: `No ${tableName} account found with this email`
             });
         }
-        
+
         const user = users[0];
         console.log('👤 User found:', user.username, 'ID:', user.id);
-        
+
         // Verify password using your password hashing utility
         console.log('🔐 Verifying password...');
         const isValid = await verifyPassword(password, user.password);
-        
+
         if (!isValid) {
             console.log('❌ Invalid password for:', email);
             return res.status(401).json({
@@ -846,7 +826,7 @@ app.post('/api/login', async (req, res) => {
                 message: 'Invalid email or password'
             });
         }
-        
+
         // Check account status
         if (user.status !== 'active' && user.status !== 'pending_verification') {
             console.log('⚠️ Account not active:', user.status);
@@ -855,9 +835,9 @@ app.post('/api/login', async (req, res) => {
                 message: `Account is ${user.status}. Please contact support.`
             });
         }
-        
+
         console.log('✅ Login successful for:', email);
-        
+
         // Remove password from response (define before logging)
         const { password: _, ...safeUser } = user;
 
@@ -868,10 +848,10 @@ app.post('/api/login', async (req, res) => {
             status: safeUser.status,
             fields_count: Object.keys(safeUser).length
         });
-        
+
         // Generate a simple token
         const token = Buffer.from(`${Date.now()}:${user.id}`).toString('base64');
-        
+
         const responseData = {
             success: true,
             message: 'Login successful',
@@ -882,10 +862,10 @@ app.post('/api/login', async (req, res) => {
             token: token,
             timestamp: new Date().toISOString()
         };
-        
+
         console.log('✅ Sending response for user:', safeUser.username);
         res.json(responseData);
-        
+
     } catch (error) {
         console.error('❌ Login error:', error);
         console.error('Error stack:', error.stack);
@@ -902,10 +882,10 @@ app.get('/api/check-structure', async (req, res) => {
     try {
         const structure = await checkTableStructure();
         const consumersFix = await addMissingColumnToConsumers();
-        
+
         let sqlFix = '';
         let criticalIssues = [];
-        
+
         // Check ID type
         if (structure?.consumers?.idType !== 'bigint' && structure?.consumers?.idType !== 'bigint_string') {
             sqlFix += `
@@ -927,18 +907,18 @@ app.get('/api/check-structure', async (req, res) => {
                 \n\n`;
             criticalIssues.push('❌ Consumers ID is not BIGINT - registration will fail!');
         }
-        
+
         // Check missing columns
         if (!consumersFix.success && consumersFix.missingColumns) {
             sqlFix += `-- ===== ADD MISSING COLUMNS TO CONSUMERS =====\n`;
             sqlFix += consumersFix.sql_fix;
             sqlFix += '\n\n';
-            
+
             if (consumersFix.missingColumns.includes('profile_photo_url')) {
                 criticalIssues.push('❌ Consumers table missing profile_photo_url column - photos won\'t be saved!');
             }
         }
-        
+
         // Check farmers table
         if (!structure?.farmers?.hasAccountVerified || !structure?.farmers?.hasCreatedAt || !structure?.farmers?.hasProfilePhotoUrl) {
             sqlFix += `-- ===== ADD MISSING COLUMNS TO FARMERS =====\n`;
@@ -946,11 +926,11 @@ app.get('/api/check-structure', async (req, res) => {
             sqlFix += `ALTER TABLE farmers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT now();\n`;
             sqlFix += `ALTER TABLE farmers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT '';\n`;
         }
-        
+
         if (sqlFix === '') {
             sqlFix = 'All required columns exist and consumers.id is BIGINT';
         }
-        
+
         res.json({
             success: true,
             message: 'Table structure check completed',
@@ -973,7 +953,7 @@ app.get('/api/check-structure', async (req, res) => {
 app.get('/api/migrate-warehouse-columns', async (req, res) => {
     try {
         console.log('📦 Checking warehouse columns in products table...');
-        
+
         // Get products table structure
         const { data, error } = await supabase
             .from('information_schema.columns')
@@ -981,11 +961,11 @@ app.get('/api/migrate-warehouse-columns', async (req, res) => {
             .eq('table_schema', 'public')
             .eq('table_name', 'products')
             .in('column_name', ['status', 'fulfillment_status', 'warehouse_ref_id']);
-        
+
         if (error && error.code !== 'PGRST116') {
             console.log('Info: Could not query columns directly, assuming they exist');
         }
-        
+
         // For now, provide instruction to add columns manually
         const sqlCommands = [
             'ALTER TABLE products ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT \'pending\';',
@@ -994,7 +974,7 @@ app.get('/api/migrate-warehouse-columns', async (req, res) => {
             'CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);',
             'CREATE INDEX IF NOT EXISTS idx_products_warehouse_ref ON products(warehouse_ref_id);'
         ];
-        
+
         res.json({
             success: true,
             message: 'Warehouse columns are ready (using without sent_to_warehouse_date)',
@@ -1020,7 +1000,7 @@ app.get('/api/migrate-warehouse-columns', async (req, res) => {
 app.get('/api/fix-consumers-id', async (req, res) => {
     try {
         const structure = await checkTableStructure();
-        
+
         if (structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string') {
             return res.json({
                 success: true,
@@ -1029,7 +1009,7 @@ app.get('/api/fix-consumers-id', async (req, res) => {
                 action_required: 'No action needed'
             });
         }
-        
+
         res.json({
             success: true,
             message: 'Consumers ID needs to be converted to BIGINT',
@@ -1062,7 +1042,7 @@ app.get('/api/fix-consumers-id', async (req, res) => {
             ].join('\n'),
             warning: 'Backup your data before running these commands!'
         });
-        
+
     } catch (error) {
         console.error('Fix consumers ID error:', error);
         res.status(500).json({
@@ -1076,9 +1056,9 @@ app.get('/api/fix-consumers-id', async (req, res) => {
 app.get('/api/fix-consumers-columns', async (req, res) => {
     try {
         console.log('🔧 Checking consumers table columns...');
-        
+
         const result = await addMissingColumnToConsumers();
-        
+
         if (result.success) {
             return res.json({
                 success: true,
@@ -1086,7 +1066,7 @@ app.get('/api/fix-consumers-columns', async (req, res) => {
                 timestamp: new Date().toISOString()
             });
         }
-        
+
         res.json({
             success: false,
             message: 'Missing columns in consumers table',
@@ -1101,7 +1081,7 @@ app.get('/api/fix-consumers-columns', async (req, res) => {
                 '5. Restart your server if needed'
             ]
         });
-        
+
     } catch (error) {
         console.error('Fix consumers columns error:', error);
         res.status(500).json({
@@ -1115,27 +1095,27 @@ app.get('/api/fix-consumers-columns', async (req, res) => {
 app.post('/api/mobile/send-otp', (req, res) => {
     try {
         const { mobile } = req.body;
-        
+
         console.log('📱 Mobile OTP request for:', mobile);
-        
+
         if (!mobile || !/^\d{10}$/.test(mobile)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid 10-digit mobile number is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Valid 10-digit mobile number is required'
             });
         }
-        
+
         const otp = generateOTP();
         const expiryTime = Date.now() + 10 * 60 * 1000;
-        
-        otpStore.set(mobile, { 
-            otp, 
+
+        otpStore.set(mobile, {
+            otp,
             expiry: expiryTime,
             created: new Date().toISOString()
         });
-        
+
         console.log(`✅ OTP ${otp} generated for ${mobile}`);
-        
+
         return res.json({
             success: true,
             message: 'OTP sent successfully to your mobile number',
@@ -1144,13 +1124,13 @@ app.post('/api/mobile/send-otp', (req, res) => {
             expiry: '10 minutes',
             timestamp: new Date().toISOString()
         });
-        
+
     } catch (error) {
         console.error('❌ Error generating OTP:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             message: 'Failed to send OTP. Please try again.',
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -1158,54 +1138,54 @@ app.post('/api/mobile/send-otp', (req, res) => {
 app.post('/api/mobile/verify', (req, res) => {
     try {
         const { mobile, otp } = req.body;
-        
+
         console.log('📱 Mobile OTP verification for:', mobile);
-        
+
         if (!mobile || !otp) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Mobile number and OTP are required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Mobile number and OTP are required'
             });
         }
-        
+
         const storedData = otpStore.get(mobile);
-        
+
         if (!storedData) {
-            return res.status(404).json({ 
-                success: false, 
+            return res.status(404).json({
+                success: false,
                 message: 'No OTP found for this number. Please request a new OTP.'
             });
         }
-        
+
         if (Date.now() > storedData.expiry) {
             otpStore.delete(mobile);
-            return res.status(400).json({ 
-                success: false, 
+            return res.status(400).json({
+                success: false,
                 message: 'OTP has expired. Please request a new OTP.'
             });
         }
-        
+
         if (storedData.otp !== otp) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Invalid OTP. Please check and try again.' 
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid OTP. Please check and try again.'
             });
         }
-        
+
         otpStore.delete(mobile);
-        
+
         res.json({
             success: true,
             message: 'Mobile number verified successfully!',
             verifiedAt: new Date().toISOString()
         });
-        
+
     } catch (error) {
         console.error('❌ Error verifying OTP:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             message: 'Failed to verify OTP. Please try again.',
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -1214,27 +1194,27 @@ app.post('/api/mobile/verify', (req, res) => {
 app.post('/api/aadhaar/send-otp', (req, res) => {
     try {
         const { aadhaar_number } = req.body;
-        
+
         console.log('🆔 Aadhaar OTP request for:', aadhaar_number);
-        
+
         if (!aadhaar_number || !/^\d{12}$/.test(aadhaar_number)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid 12-digit Aadhaar number is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Valid 12-digit Aadhaar number is required'
             });
         }
-        
+
         const otp = generateOTP();
         const expiryTime = Date.now() + 10 * 60 * 1000;
-        
-        otpStore.set(`aadhaar_${aadhaar_number}`, { 
-            otp, 
+
+        otpStore.set(`aadhaar_${aadhaar_number}`, {
+            otp,
             expiry: expiryTime,
             created: new Date().toISOString()
         });
-        
+
         console.log(`✅ Aadhaar OTP ${otp} generated for ${aadhaar_number}`);
-        
+
         return res.json({
             success: true,
             message: 'Aadhaar verification OTP sent successfully',
@@ -1243,11 +1223,11 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
             expiry: '10 minutes',
             timestamp: new Date().toISOString()
         });
-        
+
     } catch (error) {
         console.error('❌ Error generating Aadhaar OTP:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             message: 'Failed to send Aadhaar OTP. Please try again.',
             error: error.message
         });
@@ -1257,164 +1237,54 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
 app.post('/api/aadhaar/verify', (req, res) => {
     try {
         const { aadhaar_number, otp } = req.body;
-        
+
         console.log('🆔 Aadhaar verification for:', aadhaar_number);
-        
+
         if (!aadhaar_number || !otp) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Aadhaar number and OTP are required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Aadhaar number and OTP are required'
             });
         }
-        
+
         const storedData = otpStore.get(`aadhaar_${aadhaar_number}`);
-        
+
         if (!storedData) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'No OTP found for this Aadhaar. Please request a new OTP.' 
+            return res.status(404).json({
+                success: false,
+                message: 'No OTP found for this Aadhaar. Please request a new OTP.'
             });
         }
-        
+
         if (Date.now() > storedData.expiry) {
             otpStore.delete(`aadhaar_${aadhaar_number}`);
-            return res.status(400).json({ 
-                success: false, 
-                message: 'OTP has expired. Please request a new OTP.' 
+            return res.status(400).json({
+                success: false,
+                message: 'OTP has expired. Please request a new OTP.'
             });
         }
-        
+
         if (storedData.otp !== otp) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Invalid OTP. Please check and try again.' 
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid OTP. Please check and try again.'
             });
         }
-        
+
         otpStore.delete(`aadhaar_${aadhaar_number}`);
-        
+
         res.json({
             success: true,
             message: 'Aadhaar verified successfully!',
             verifiedAt: new Date().toISOString()
         });
-        
+
     } catch (error) {
         console.error('❌ Error verifying Aadhaar OTP:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             message: 'Failed to verify Aadhaar OTP. Please try again.',
-            error: error.message 
-        });
-    }
-});
-
-// ==================== EMAIL OTP ENDPOINTS ====================
-app.post('/api/email/send-otp', async (req, res) => {
-    try {
-        const { email, userType } = req.body;
-        
-        console.log(`📧 Email OTP request for: ${email} (${userType})`);
-        
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid email address is required' 
-            });
-        }
-        
-        const otp = generateOTP();
-        const expiryTime = Date.now() + 10 * 60 * 1000;
-        
-        otpStore.set(`email_${email}`, { 
-            otp, 
-            expiry: expiryTime,
-            created: new Date().toISOString(),
-            userType: userType || 'unknown'
-        });
-        
-        const emailResult = await sendOTPEmail(email, otp);
-        
-        if (!emailResult.success) {
-            return res.status(500).json({ 
-                success: false, 
-                message: 'Failed to send OTP email. Please try again.',
-                error: emailResult.error
-            });
-        }
-        
-        console.log(`✅ Email OTP ${otp} sent to ${email}`);
-        
-        return res.json({
-            success: true,
-            message: 'OTP sent successfully to your email',
-            otp: otp,
-            debug_otp: otp,
-            expiry: '10 minutes',
-            timestamp: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ Error generating Email OTP:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Failed to send OTP. Please try again.',
-            error: error.message 
-        });
-    }
-});
-
-app.post('/api/email/verify', (req, res) => {
-    try {
-        const { email, otp } = req.body;
-        
-        console.log(`📧 Email OTP verification for: ${email}`);
-        
-        if (!email || !otp) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Email and OTP are required' 
-            });
-        }
-        
-        const storedData = otpStore.get(`email_${email}`);
-        
-        if (!storedData) {
-            return res.status(404).json({ 
-                success: false, 
-                message: 'No OTP found for this email. Please request a new OTP.' 
-            });
-        }
-        
-        if (Date.now() > storedData.expiry) {
-            otpStore.delete(`email_${email}`);
-            return res.status(400).json({ 
-                success: false, 
-                message: 'OTP has expired. Please request a new OTP.' 
-            });
-        }
-        
-        if (storedData.otp !== otp) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Invalid OTP. Please check and try again.' 
-            });
-        }
-        
-        otpStore.delete(`email_${email}`);
-        
-        res.json({
-            success: true,
-            message: 'Email verified successfully!',
-            verifiedAt: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ Error verifying Email OTP:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Failed to verify OTP. Please try again.',
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -1423,47 +1293,47 @@ app.post('/api/email/verify', (req, res) => {
 app.post('/api/upload-photo', async (req, res) => {
     try {
         let { imageData, profile_photo_base64, userType, userId } = req.body;
-        
+
         const photoData = imageData || profile_photo_base64;
-        
+
         console.log('📸 Photo upload request for:', userType, 'User ID:', userId || 'temp');
-        
+
         if (!photoData) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'No image data provided' 
+            return res.status(400).json({
+                success: false,
+                message: 'No image data provided'
             });
         }
-        
+
         if (!photoData.startsWith('data:image/')) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Invalid image format. Must be base64 image data.' 
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid image format. Must be base64 image data.'
             });
         }
-        
+
         const bucketExists = await checkBucketExists();
         if (!bucketExists) {
-            return res.status(500).json({ 
-                success: false, 
+            return res.status(500).json({
+                success: false,
                 message: 'Storage bucket not configured',
                 instructions: 'Please create bucket "profile-photos" manually in Supabase Dashboard'
             });
         }
-        
+
         const photoUrl = await uploadToSupabaseStorage(
-            photoData, 
-            userType, 
+            photoData,
+            userType,
             userId || 'temp_' + Date.now()
         );
-        
+
         if (!photoUrl) {
-            return res.status(500).json({ 
-                success: false, 
-                message: 'Failed to upload image to storage' 
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to upload image to storage'
             });
         }
-        
+
         res.json({
             success: true,
             message: 'Profile photo uploaded successfully to Supabase Storage!',
@@ -1471,13 +1341,13 @@ app.post('/api/upload-photo', async (req, res) => {
             storage: 'Supabase Storage',
             note: 'Image stored in cloud storage, URL returned for database storage'
         });
-        
+
     } catch (error) {
         console.error('❌ Photo upload endpoint error:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             message: 'Failed to process photo upload',
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -1486,9 +1356,9 @@ app.post('/api/upload-photo', async (req, res) => {
 app.get('/api/check-bucket', async (req, res) => {
     try {
         console.log('🔍 Checking storage bucket status...');
-        
+
         const bucketExists = await checkBucketExists();
-        
+
         if (!bucketExists) {
             return res.json({
                 success: false,
@@ -1503,11 +1373,11 @@ app.get('/api/check-bucket', async (req, res) => {
                 ]
             });
         }
-        
+
         const { data: files, error: listError } = await supabase.storage
             .from('profile-photos')
             .list();
-        
+
         if (listError) {
             return res.json({
                 success: false,
@@ -1515,19 +1385,19 @@ app.get('/api/check-bucket', async (req, res) => {
                 error: listError.message
             });
         }
-        
+
         res.json({
             success: true,
             message: 'Bucket "profile-photos" exists and is accessible',
             fileCount: files.length,
             files: files.slice(0, 10).map(f => f.name)
         });
-        
+
     } catch (error) {
         console.error('❌ Check bucket error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
+        res.status(500).json({
+            success: false,
+            error: error.message
         });
     }
 });
@@ -1536,64 +1406,64 @@ app.get('/api/check-bucket', async (req, res) => {
 app.post('/api/test-upload', async (req, res) => {
     try {
         console.log('🔍 Received test upload request');
-        
+
         const { testImage } = req.body;
-        
+
         if (!testImage) {
-            return res.status(400).json({ 
-                success: false, 
+            return res.status(400).json({
+                success: false,
                 message: 'No test image provided'
             });
         }
-        
+
         if (!testImage.startsWith('data:image/')) {
-            return res.status(400).json({ 
-                success: false, 
+            return res.status(400).json({
+                success: false,
                 message: 'Not a valid base64 image'
             });
         }
-        
+
         const bucketExists = await checkBucketExists();
         if (!bucketExists) {
-            return res.status(500).json({ 
-                success: false, 
+            return res.status(500).json({
+                success: false,
                 message: 'Bucket not configured'
             });
         }
-        
+
         const bucketName = 'profile-photos';
         const timestamp = Date.now();
         const filename = `test_${timestamp}.jpg`;
-        
+
         console.log(`📤 Uploading test file: ${filename}`);
-        
+
         const base64Data = testImage.replace(/^data:image\/\w+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
-        
+
         console.log(`📊 Buffer size: ${buffer.length} bytes`);
-        
+
         const { data: uploadData, error: uploadError } = await supabase.storage
             .from(bucketName)
             .upload(filename, buffer, {
                 contentType: 'image/jpeg',
                 upsert: true
             });
-        
+
         if (uploadError) {
             console.error('❌ Upload error:', uploadError);
-            return res.status(500).json({ 
-                success: false, 
+            return res.status(500).json({
+                success: false,
                 message: 'Upload failed',
-                error: uploadError.message 
+                error: uploadError.message
             });
         }
-        
+
         const { data: urlData } = supabase.storage
             .from(bucketName)
             .getPublicUrl(filename);
-        
+
         console.log('✅ Test upload successful!');
-        
+
         res.json({
             success: true,
             message: 'Test upload successful!',
@@ -1601,11 +1471,11 @@ app.post('/api/test-upload', async (req, res) => {
             bucket: bucketName,
             filename: filename
         });
-        
+
     } catch (error) {
         console.error('❌ Test upload error:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             error: error.message
         });
     }
@@ -1615,46 +1485,46 @@ app.post('/api/test-upload', async (req, res) => {
 app.post('/api/register/consumer', async (req, res) => {
     try {
         const { username, email, mobile, password, profile_photo_base64, profile_photo_url } = req.body;
-        
+
         console.log('👤 Consumer registration request:', { username, email, mobile });
         console.log('📸 Photo data present:', !!(profile_photo_base64 || profile_photo_url));
-        
+
         if (!username || username.length < 3) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Username must be at least 3 characters' 
+            return res.status(400).json({
+                success: false,
+                message: 'Username must be at least 3 characters'
             });
         }
-        
+
         if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid email address is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Valid email address is required'
             });
         }
-        
+
         if (!mobile || !/^\d{10}$/.test(mobile)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid 10-digit mobile number is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Valid 10-digit mobile number is required'
             });
         }
-        
+
         if (!password || password.length < 6) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Password must be at least 6 characters' 
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters'
             });
         }
-        
+
         const userExists = await checkUserExists(email, mobile);
         if (userExists) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'User with this email or mobile already exists' 
+            return res.status(400).json({
+                success: false,
+                message: 'User with this email or mobile already exists'
             });
         }
-        
+
         // Check table structure before proceeding
         const consumersFix = await addMissingColumnToConsumers();
         if (!consumersFix.success && consumersFix.missingColumns.includes('profile_photo_url')) {
@@ -1665,12 +1535,12 @@ app.post('/api/register/consumer', async (req, res) => {
                 fix_instructions: 'Visit /api/fix-consumers-columns endpoint for SQL to fix this'
             });
         }
-        
+
         const bucketExists = await checkBucketExists();
         if (!bucketExists) {
             console.log('⚠️ Bucket not found - continuing registration without photo upload');
         }
-        
+
         const result = await insertConsumer({
             username,
             email,
@@ -1679,7 +1549,7 @@ app.post('/api/register/consumer', async (req, res) => {
             profile_photo_base64,
             profile_photo_url
         });
-        
+
         if (!result.success) {
             // Check if it's a column missing error
             let fixHint = '';
@@ -1690,17 +1560,17 @@ app.post('/api/register/consumer', async (req, res) => {
             } else if (result.error?.includes('id')) {
                 fixHint = 'Check if consumers.id column is BIGINT in database. Check /api/fix-consumers-id';
             }
-            
-            return res.status(500).json({ 
-                success: false, 
+
+            return res.status(500).json({
+                success: false,
                 message: 'Failed to create account. Please try again.',
                 error: result.error,
                 fix_hint: fixHint
             });
         }
-        
+
         console.log('✅ Consumer registration completed successfully!');
-        
+
         const responseData = {
             success: true,
             message: 'Consumer account created successfully!',
@@ -1713,33 +1583,33 @@ app.post('/api/register/consumer', async (req, res) => {
                 status: result.data.status
             }
         };
-        
+
         // CRITICAL: Check if profile_photo_url exists in response
         if (result.data.profile_photo_url !== undefined) {
             responseData.user.profile_photo_url = result.data.profile_photo_url || '';
-            responseData.user.storage_note = result.data.profile_photo_url ? 
-                'Profile photo stored in Supabase Storage' : 
+            responseData.user.storage_note = result.data.profile_photo_url ?
+                'Profile photo stored in Supabase Storage' :
                 'No profile photo provided';
         } else {
             console.warn('⚠️ profile_photo_url not in response - column might not exist in table');
             responseData.user.profile_photo_url = '';
             responseData.user.note = 'profile_photo_url column might be missing in database';
         }
-        
+
         if (result.data.created_at) {
             responseData.user.created_at = result.data.created_at;
         }
-        
+
         if (result.data.updated_at) {
             responseData.user.updated_at = result.data.updated_at;
         }
-        
+
         res.json(responseData);
-        
+
     } catch (error) {
         console.error('❌ Consumer registration error:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             message: 'Registration failed. Please try again.',
             error: error.message,
             fix_hints: [
@@ -1753,72 +1623,72 @@ app.post('/api/register/consumer', async (req, res) => {
 
 app.post('/api/register/farmer', async (req, res) => {
     try {
-        const { 
+        const {
             username, email, aadhaar_number, mobile, password,
             profile_photo_base64, profile_photo_url, farm_name, farm_size, specialization,
             certifications, village, taluka, district, state, pin_code,
             account_holder_name, account_number, bank_name, ifsc_code,
             branch_name, aadhaar_verified, mobile_verified
         } = req.body;
-        
+
         console.log('👨‍🌾 Farmer registration request:', { username, email, farm_name });
         console.log('📸 Photo data present:', !!(profile_photo_base64 || profile_photo_url));
-        
+
         if (!username || username.length < 3) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Username must be at least 3 characters' 
+            return res.status(400).json({
+                success: false,
+                message: 'Username must be at least 3 characters'
             });
         }
-        
+
         if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid email address is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Valid email address is required'
             });
         }
-        
+
         if (!aadhaar_number || !/^\d{12}$/.test(aadhaar_number)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid 12-digit Aadhaar number is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Valid 12-digit Aadhaar number is required'
             });
         }
-        
+
         if (!mobile || !/^\d{10}$/.test(mobile)) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Valid 10-digit mobile number is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Valid 10-digit mobile number is required'
             });
         }
-        
+
         if (!password || password.length < 6) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Password must be at least 6 characters' 
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters'
             });
         }
-        
+
         if (!farm_name) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Farm name is required' 
+            return res.status(400).json({
+                success: false,
+                message: 'Farm name is required'
             });
         }
-        
+
         const userExists = await checkUserExists(email, mobile);
         if (userExists) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'User with this email or mobile already exists' 
+            return res.status(400).json({
+                success: false,
+                message: 'User with this email or mobile already exists'
             });
         }
-        
+
         const bucketExists = await checkBucketExists();
         if (!bucketExists) {
             console.log('⚠️ Bucket not found - continuing registration without photo upload');
         }
-        
+
         const result = await insertFarmer({
             username,
             email,
@@ -1844,18 +1714,18 @@ app.post('/api/register/farmer', async (req, res) => {
             aadhaar_verified: aadhaar_verified || false,
             mobile_verified: mobile_verified || false
         });
-        
+
         if (!result.success) {
-            return res.status(500).json({ 
-                success: false, 
+            return res.status(500).json({
+                success: false,
                 message: 'Failed to create farmer account. Please try again.',
                 error: result.error,
                 note: 'Check /api/check-structure endpoint to see missing columns'
             });
         }
-        
+
         console.log('✅ Farmer registration completed successfully!');
-        
+
         const responseData = {
             success: true,
             message: 'Farmer account created successfully! Your account will be verified within 24-48 hours.',
@@ -1870,25 +1740,25 @@ app.post('/api/register/farmer', async (req, res) => {
                 status: result.data.status
             }
         };
-        
+
         if (result.data.account_verified !== undefined) {
             responseData.farmer.account_verified = result.data.account_verified;
         }
-        
+
         if (result.data.profile_photo_url !== undefined) {
             responseData.farmer.profile_photo_url = result.data.profile_photo_url || '';
         }
-        
+
         if (result.data.created_at) {
             responseData.farmer.created_at = result.data.created_at;
         }
-        
+
         res.json(responseData);
-        
+
     } catch (error) {
         console.error('❌ Farmer registration error:', error);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             message: 'Registration failed. Please try again.',
             error: error.message,
             note: 'Check table structure and add missing columns'
@@ -1900,12 +1770,12 @@ app.post('/api/register/farmer', async (req, res) => {
 app.get('/api/debug/storage', async (req, res) => {
     try {
         console.log('🔍 Checking storage...');
-        
+
         const bucketName = 'profile-photos';
         const { data, error } = await supabase.storage
             .from(bucketName)
             .list();
-        
+
         if (error) {
             console.error('Storage list error:', error);
             return res.json({
@@ -1915,9 +1785,9 @@ app.get('/api/debug/storage', async (req, res) => {
                 instructions: 'Please create bucket manually in Supabase Dashboard'
             });
         }
-        
+
         console.log(`📁 Found ${data.length} files in bucket`);
-        
+
         res.json({
             success: true,
             message: 'Storage bucket accessible',
@@ -1932,9 +1802,9 @@ app.get('/api/debug/storage', async (req, res) => {
         });
     } catch (error) {
         console.error('Debug storage error:', error);
-        res.json({ 
+        res.json({
             success: false,
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -1945,12 +1815,12 @@ app.get('/api/debug/users', async (req, res) => {
             .from('consumers')
             .select('id, username, email, mobile, status, profile_photo_url, created_at')
             .limit(5);
-        
+
         const { data: farmers } = await supabase
             .from('farmers')
             .select('id, username, email, mobile, farm_name, status, account_verified, created_at')
             .limit(5);
-        
+
         // Check ID types
         let consumerIdType = 'unknown';
         if (consumers && consumers.length > 0) {
@@ -1959,7 +1829,7 @@ app.get('/api/debug/users', async (req, res) => {
             else if (typeof id === 'number') consumerIdType = 'bigint';
             else if (typeof id === 'string' && /^\d+$/.test(id)) consumerIdType = 'bigint_string';
         }
-        
+
         res.json({
             success: true,
             consumers_count: consumers?.length || 0,
@@ -1970,9 +1840,9 @@ app.get('/api/debug/users', async (req, res) => {
         });
     } catch (error) {
         console.error('Debug users error:', error);
-        res.json({ 
+        res.json({
             success: false,
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -1982,12 +1852,12 @@ app.get('/api/debug/users', async (req, res) => {
 app.get('/api/products', async (req, res) => {
     try {
         console.log('📦 Fetching products...');
-        
-        const { 
-            search, 
-            category, 
-            farmer_id, 
-            limit = 50, 
+
+        const {
+            search,
+            category,
+            farmer_id,
+            limit = 50,
             offset = 0,
             sort_by = 'created_at',
             sort_order = 'desc'
@@ -2018,17 +1888,17 @@ app.get('/api/products', async (req, res) => {
         }
 
         const { data: products, error, count } = await query;
-        
+
         if (error) {
             console.error('❌ Error fetching products:', error);
-            return res.status(500).json({ 
+            return res.status(500).json({
                 error: 'Failed to fetch products',
-                details: error.message 
+                details: error.message
             });
         }
 
         console.log(`✅ Found ${products?.length || 0} products`);
-        
+
         // Keep image_url as array if it's an array, otherwise convert to array
         const normalizedProducts = (products || []).map(p => ({
             ...p,
@@ -2053,9 +1923,9 @@ app.get('/api/products', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Unexpected error in products endpoint:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Internal server error',
-            details: error.message 
+            details: error.message
         });
     }
 });
@@ -2075,25 +1945,25 @@ app.get('/api/products/:id', async (req, res) => {
 
         if (error) {
             console.error('❌ Error fetching product:', error);
-            return res.status(500).json({ 
+            return res.status(500).json({
                 error: 'Failed to fetch product',
-                details: error.message 
+                details: error.message
             });
         }
 
         if (!product) {
-            return res.status(404).json({ 
-                error: 'Product not found' 
+            return res.status(404).json({
+                error: 'Product not found'
             });
         }
 
         console.log(`✅ Found product: ${product.name}`);
-        
+
         const normalizedProduct = {
             ...product,
             image_url: Array.isArray(product.image_url) ? product.image_url : (product.image_url ? [product.image_url] : []),
         };
-        
+
         res.json({
             success: true,
             product: normalizedProduct
@@ -2101,9 +1971,9 @@ app.get('/api/products/:id', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Unexpected error in product endpoint:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Internal server error',
-            details: error.message 
+            details: error.message
         });
     }
 });
@@ -2139,7 +2009,7 @@ app.post("/api/products", async (req, res) => {
         // Handle single imageData field or images array
         let imageUrl = '';
         const uploadedImages = [];
-        
+
         // Priority: imageData (single image from form) over images array
         if (imageData && imageData.startsWith("data:image/")) {
             console.log('📤 Uploading product image from imageData...');
@@ -2465,15 +2335,326 @@ app.put("/api/products/:id/fulfillment", async (req, res) => {
     }
 });
 
+// ==================== REVIEW HELPERS ====================
+async function recalculateProductRating(productId) {
+    const { data: reviews, error } = await supabase
+        .from('reviews')
+        .select('rating')
+        .eq('product_id', productId)
+        .eq('status', 'active');
+
+    if (error) {
+        console.error('❌ Rating recalculation error:', error);
+        return;
+    }
+
+    const reviewCount = reviews.length;
+    const avgRating =
+        reviewCount === 0
+            ? 0
+            : reviews.reduce((sum, r) => sum + r.rating, 0) / reviewCount;
+
+    await supabase
+        .from('products')
+        .update({
+            avg_rating: avgRating,
+            review_count: reviewCount
+        })
+        .eq('id', productId);
+}
+
+// ==================== PRODUCT REVIEWS ====================
+
+// Get reviews for a product
+app.get('/api/products/:id/reviews', requireAuth, async (req, res) => {
+    try {
+        const { id: productId } = req.params;
+
+        // ✅ DEFINE BOTH VARIABLES
+        const limit = parseInt(req.query.limit, 10) || 10;
+        const offset = parseInt(req.query.offset, 10) || 0;
+
+        const { data: reviews, error } = await supabase
+            .from('reviews')
+            .select(`
+                id,
+                rating,
+                review_text,
+                created_at,
+                consumers (
+                    id,
+                    username,
+                    profile_photo_url
+                )
+            `)
+            .eq('product_id', productId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+
+        if (error) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to fetch reviews',
+                error: error.message
+            });
+        }
+
+        res.json({
+            success: true,
+            reviews,
+            count: reviews.length,
+            pagination: {
+                limit,
+                offset,
+                next_offset: offset + limit
+            }
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: err.message
+        });
+    }
+});
+
+
+// Add review for a product
+app.post('/api/products/:id/reviews', requireAuth, async (req, res) => {
+    try {
+        const { id: productId } = req.params;
+        const { rating, review_text = '' } = req.body;
+        const customerId = req.user.id;
+
+        // Basic validation
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rating must be an integer between 1 and 5'
+            });
+        }
+
+        // 1️⃣ Check if review already exists
+        const { data: existingReview } = await supabase
+            .from('reviews')
+            .select('id')
+            .eq('product_id', productId)
+            .eq('customer_id', customerId)
+            .eq('status', 'active')
+            .single();
+
+        if (existingReview) {
+            // 2️⃣ Update existing review
+            await supabase
+                .from('reviews')
+                .update({
+                    rating,
+                    review_text,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', existingReview.id);
+
+            await recalculateProductRating(productId);
+
+            return res.json({
+                success: true,
+                message: 'Review updated successfully'
+            });
+        }
+
+        // 3️⃣ Insert new review
+        await supabase
+            .from('reviews')
+            .insert({
+                product_id: productId,
+                customer_id: customerId,
+                rating,
+                review_text,
+                status: 'active'
+            });
+
+        await recalculateProductRating(productId);
+
+        return res.status(201).json({
+            success: true,
+            message: 'Review added successfully'
+        });
+
+    } catch (err) {
+        // 4️⃣ Safety net for race conditions
+        if (err.code === '23505') {
+            return res.status(409).json({
+                success: false,
+                message: 'You have already reviewed this product'
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: err.message
+        });
+    }
+});
+
+// ==================== REVIEW MODERATION (FARMER / ADMIN) ====================
+app.put('/api/reviews/:id/hide', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Fetch review to get product_id
+        const { data: review, error: fetchError } = await supabase
+            .from('reviews')
+            .select('product_id, status')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !review) {
+            return res.status(404).json({
+                success: false,
+                message: 'Review not found'
+            });
+        }
+
+        if (review.status === 'hidden') {
+            return res.json({
+                success: true,
+                message: 'Review already hidden'
+            });
+        }
+
+        // Hide the review
+        const { error: updateError } = await supabase
+            .from('reviews')
+            .update({
+                status: 'hidden',
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id);
+
+        if (updateError) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to hide review',
+                error: updateError.message
+            });
+        }
+
+        // Recalculate product rating
+        await recalculateProductRating(review.product_id);
+
+        res.json({
+            success: true,
+            message: 'Review hidden successfully'
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: err.message
+        });
+    }
+});
+
+// Update review (only owner)
+app.put('/api/reviews/:id', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { rating, review_text } = req.body;
+        const customerId = req.user.id;
+
+        const { data: review } = await supabase
+            .from('reviews')
+            .select('product_id')
+            .eq('id', id)
+            .eq('customer_id', customerId)
+            .eq('status', 'active')
+            .single();
+
+        if (!review) {
+            return res.status(403).json({
+                success: false,
+                message: 'Not allowed to edit this review'
+            });
+        }
+
+        await supabase
+            .from('reviews')
+            .update({
+                rating,
+                review_text,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id);
+
+        await recalculateProductRating(review.product_id);
+
+        res.json({
+            success: true,
+            message: 'Review updated successfully'
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error: err.message
+        });
+    }
+});
+
+// Delete review (soft delete, only owner)
+app.delete('/api/reviews/:id', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const customerId = Number(req.user.id);
+
+        const { data: review } = await supabase
+            .from('reviews')
+            .select('product_id')
+            .eq('id', id)
+            .eq('customer_id', customerId)
+            .eq('status', 'active')
+            .single();
+
+        if (!review) {
+            return res.status(403).json({
+                success: false,
+                message: 'Not allowed to delete this review'
+            });
+        }
+
+        await supabase
+            .from('reviews')
+            .update({ status: 'deleted' })
+            .eq('id', id);
+
+        await recalculateProductRating(review.product_id);
+
+        res.json({
+            success: true,
+            message: 'Review deleted successfully'
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: 'Server error'
+        });
+    }
+});
+
 // ==================== TOURS ENDPOINT ====================
 app.get('/api/tours', async (req, res) => {
     try {
         console.log('🎢 Fetching tours...');
-        
-        const { 
-            search, 
-            farmer_id, 
-            limit = 20, 
+
+        const {
+            search,
+            farmer_id,
+            limit = 20,
             offset = 0,
             sort_by = 'created_at',
             sort_order = 'desc'
@@ -2500,17 +2681,17 @@ app.get('/api/tours', async (req, res) => {
         }
 
         const { data: tours, error, count } = await query;
-        
+
         if (error) {
             console.error('❌ Error fetching tours:', error);
-            return res.status(500).json({ 
+            return res.status(500).json({
                 error: 'Failed to fetch tours',
-                details: error.message 
+                details: error.message
             });
         }
 
         console.log(`✅ Found ${tours?.length || 0} tours`);
-        
+
         const normalizedTours = (tours || []).map(t => ({
             ...t,
             // Map backend columns to frontend-friendly names
@@ -2538,9 +2719,9 @@ app.get('/api/tours', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Unexpected error in tours endpoint:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Internal server error',
-            details: error.message 
+            details: error.message
         });
     }
 });
@@ -2656,17 +2837,17 @@ app.get('/api/tours/:id', async (req, res) => {
 
         if (error) {
             console.error('❌ Error fetching tour:', error);
-            return res.status(500).json({ 
+            return res.status(500).json({
                 success: false,
                 message: 'Failed to fetch tour',
-                error: error.message 
+                error: error.message
             });
         }
 
         if (!tour) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 success: false,
-                message: 'Tour not found' 
+                message: 'Tour not found'
             });
         }
 
@@ -2687,10 +2868,10 @@ app.get('/api/tours/:id', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Unexpected error in tour endpoint:', error);
-        return res.status(500).json({ 
+        return res.status(500).json({
             success: false,
             message: 'Internal server error',
-            error: error.message 
+            error: error.message
         });
     }
 });
@@ -2735,7 +2916,7 @@ app.put('/api/tours/:id', async (req, res) => {
                         .select('farmer_id')
                         .eq('id', id)
                         .single();
-                    
+
                     const url = await uploadProductImage(img, tourData?.farmer_id || 'unknown');
                     if (url) uploadedTourUrls.push(url);
                 } else if (typeof img === 'string') {
@@ -2809,7 +2990,7 @@ app.delete('/api/tours/:id', async (req, res) => {
         // Soft delete by setting is_active to false
         const { data, error } = await supabase
             .from('tours')
-            .update({ 
+            .update({
                 is_active: false,
                 updated_at: new Date().toISOString()
             })
@@ -3045,7 +3226,7 @@ app.put('/api/farmer/profile/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const updateData = req.body;
-        
+
         console.log(`🌾 Updating farmer profile for ID: ${id}`);
 
         // Remove sensitive fields that shouldn't be updated directly
@@ -3094,7 +3275,7 @@ app.put('/api/customer/profile/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const updateData = req.body;
-        
+
         console.log(`👤 Updating customer profile for ID: ${id}`);
 
         // Remove sensitive fields that shouldn't be updated directly
@@ -3142,8 +3323,8 @@ app.put('/api/customer/profile/:id', async (req, res) => {
 app.get('/', async (req, res) => {
     try {
         const structure = await checkTableStructure();
-        
-        res.json({ 
+
+        res.json({
             server: 'FarmTrials Complete Registration API',
             version: '1.0.0',
             status: 'operational',
@@ -3216,8 +3397,8 @@ app.get('/', async (req, res) => {
                     update_customer: 'PUT /api/customer/profile/:id'
                 }
             },
-            critical_check: structure?.consumers?.hasProfilePhotoUrl ? 
-                '✅ profile_photo_url column exists with NOT NULL constraint' : 
+            critical_check: structure?.consumers?.hasProfilePhotoUrl ?
+                '✅ profile_photo_url column exists with NOT NULL constraint' :
                 '❌ profile_photo_url column missing - run /api/fix-consumers-columns'
         });
     } catch (error) {
@@ -3292,14 +3473,14 @@ app.use((err, req, res, next) => {
 setInterval(() => {
     const now = Date.now();
     let cleanedCount = 0;
-    
+
     for (const [key, data] of otpStore.entries()) {
         if (now > data.expiry) {
             otpStore.delete(key);
             cleanedCount++;
         }
     }
-    
+
     if (cleanedCount > 0) {
         console.log(`🧹 Cleaned up ${cleanedCount} expired OTPs`);
     }
@@ -3315,10 +3496,10 @@ app.listen(PORT, async () => {
     🔗 Supabase: Connected
     ⏰ Started: ${new Date().toISOString()}
     `);
-    
+
     console.log('🔍 Checking storage bucket...');
     const bucketExists = await checkBucketExists();
-    
+
     if (bucketExists) {
         console.log('✅ Storage bucket "profile-photos" is ready!');
     } else {
@@ -3332,14 +3513,14 @@ app.listen(PORT, async () => {
         console.log('6. Create bucket');
         console.log('\n⚠️ Without bucket, photo uploads will fail but registration will still work.');
     }
-    
+
     console.log('\n🔍 Checking table structure...');
     const structure = await checkTableStructure();
     const consumersFix = await addMissingColumnToConsumers();
-    
+
     const consumersIdOk = structure?.consumers?.idType === 'bigint' || structure?.consumers?.idType === 'bigint_string';
     const consumersHasPhotoColumn = structure?.consumers?.hasProfilePhotoUrl;
-    
+
     console.log(`
     📦 Storage: ${bucketExists ? '✅ Ready' : '❌ Manual setup required'}
     🆔 Consumers ID: ${consumersIdOk ? '✅ BIGINT (int8)' : `❌ ${structure?.consumers?.idType || 'Unknown'} - FIX REQUIRED!`}
