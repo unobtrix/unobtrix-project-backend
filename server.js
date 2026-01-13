@@ -1374,7 +1374,7 @@ app.post('/api/email/send-otp', async (req, res) => {
             });
         }
         
-        console.log(`✅ Email OTP ${otp} sent to ${email}`);
+        console.log(`✅ Email OTP sent to ${email}`);
         
         return res.json({
             success: true,
