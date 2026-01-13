@@ -10,10 +10,21 @@ const app = express();
 
 // ==================== NODEMAILER CONFIGURATION ====================
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
     auth: {
-        user: 'unobtrix1@gmail.com',
-        pass: 'lnfrtqopyocureya'
+        user: process.env.EMAIL_USER || 'unobtrix1@gmail.com',
+        pass: process.env.EMAIL_PASSWORD || 'lnfrtqopyocureya'
+    },
+    connectionTimeout: 10000,
+    socketTimeout: 10000,
+    pool: {
+        maxConnections: 5,
+        maxMessages: 100,
+        rateDelta: 4000,
+        rateLimit: 14
     }
 });
 
@@ -21,15 +32,16 @@ const transporter = nodemailer.createTransport({
 transporter.verify((error, success) => {
     if (error) {
         console.error('❌ Email transporter error:', error);
+        console.error('📧 Make sure your .env has EMAIL_USER and EMAIL_PASSWORD set');
     } else {
-        console.log('✅ Email transporter ready');
+        console.log('✅ Email transporter ready - SMTP connected successfully');
     }
 });
 
 async function sendOTPEmail(email, otp) {
     try {
         const mailOptions = {
-            from: 'unobtrix1@gmail.com',
+            from: process.env.EMAIL_USER || 'unobtrix1@gmail.com',
             to: email,
             subject: 'Ximfy - Your Email Verification Code',
             html: `
