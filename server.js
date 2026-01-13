@@ -3,45 +3,20 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 require('dotenv').config();
 
 const app = express();
 
-// ==================== NODEMAILER CONFIGURATION ====================
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: {
-        user: process.env.EMAIL_USER || 'unobtrix1@gmail.com',
-        pass: process.env.EMAIL_PASSWORD || 'lnfrtqopyocureya'
-    },
-    connectionTimeout: 10000,
-    socketTimeout: 10000,
-    pool: {
-        maxConnections: 5,
-        maxMessages: 100,
-        rateDelta: 4000,
-        rateLimit: 14
-    }
-});
-
-// Test the transporter connection
-transporter.verify((error, success) => {
-    if (error) {
-        console.error('❌ Email transporter error:', error);
-        console.error('📧 Make sure your .env has EMAIL_USER and EMAIL_PASSWORD set');
-    } else {
-        console.log('✅ Email transporter ready - SMTP connected successfully');
-    }
-});
+// ==================== RESEND EMAIL CONFIGURATION ====================
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendOTPEmail(email, otp) {
     try {
-        const mailOptions = {
-            from: process.env.EMAIL_USER || 'unobtrix1@gmail.com',
+        console.log(`📧 Attempting to send OTP to ${email} via Resend...`);
+        
+        const result = await resend.emails.send({
+            from: 'Ximfy <onboarding@resend.dev>',
             to: email,
             subject: 'Ximfy - Your Email Verification Code',
             html: `
@@ -63,13 +38,17 @@ async function sendOTPEmail(email, otp) {
                     </div>
                 </div>
             `
-        };
+        });
 
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`✅ OTP email sent to ${email}`);
-        return { success: true, messageId: info.messageId };
+        if (result.error) {
+            console.error('❌ Resend error:', result.error);
+            return { success: false, error: result.error.message };
+        }
+
+        console.log(`✅ Email sent successfully via Resend to ${email}. ID: ${result.data.id}`);
+        return { success: true, messageId: result.data.id };
     } catch (error) {
-        console.error('❌ Error sending OTP email:', error);
+        console.error('❌ Error sending OTP email via Resend:', error);
         return { success: false, error: error.message };
     }
 }
