@@ -1174,6 +1174,7 @@ app.post('/api/mobile/send-otp', (req, res) => {
         return res.json({
             success: true,
             message: 'OTP sent successfully to your mobile number',
+            debug_otp: otp,
             expiry: '10 minutes',
             timestamp: new Date().toISOString()
         });
@@ -1271,6 +1272,7 @@ app.post('/api/aadhaar/send-otp', (req, res) => {
         return res.json({
             success: true,
             message: 'Aadhaar verification OTP sent successfully',
+            debug_otp: otp,
             expiry: '10 minutes',
             timestamp: new Date().toISOString()
         });
