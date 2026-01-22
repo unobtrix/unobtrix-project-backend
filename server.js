@@ -3647,6 +3647,363 @@ setInterval(() => {
     }
 }, 60 * 60 * 1000); // Clean up every hour
 
+// ==================== FORGOT PASSWORD ENDPOINTS ====================
+
+// Check if email exists
+app.post('/api/forgot-password/check-email', async (req, res) => {
+    try {
+        const { email, userType = 'consumer' } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email is required'
+            });
+        }
+
+        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
+        console.log(`🔍 Checking if email exists in ${tableName} table: ${email}`);
+
+        const { data: users, error } = await supabase
+            .from(tableName)
+            .select('id, email')
+            .eq('email', email.toLowerCase().trim())
+            .limit(1);
+
+        if (error) {
+            console.error('❌ Database error:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Database error'
+            });
+        }
+
+        if (!users || users.length === 0) {
+            console.log('❌ Email not found:', email);
+            return res.status(404).json({
+                success: false,
+                message: 'Email not found in our system'
+            });
+        }
+
+        console.log('✅ Email found:', email);
+        res.json({
+            success: true,
+            message: 'Email verified',
+            userId: users[0].id
+        });
+
+    } catch (error) {
+        console.error('❌ Error checking email:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error checking email',
+            error: error.message
+        });
+    }
+});
+
+// Send OTP for password reset
+app.post('/api/forgot-password/send-otp', async (req, res) => {
+    try {
+        const { email, userType = 'consumer' } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email is required'
+            });
+        }
+
+        console.log(`📧 Sending password reset OTP to: ${email}`);
+
+        // Generate OTP
+        const otp = generateOTP(6);
+        const expiryTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // Store OTP in memory
+        otpStore.set(`pwd_reset_${email}`, {
+            otp: otp,
+            expiry: expiryTime,
+            userType: userType,
+            attempts: 0
+        });
+
+        console.log(`🔐 OTP generated for ${email}: ${otp} (expires at ${expiryTime.toISOString()})`);
+
+        // Send OTP via email
+        const emailResult = await sendOTPEmail(email, otp);
+
+        if (!emailResult.success) {
+            console.error('❌ Failed to send OTP email:', emailResult.error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to send OTP email',
+                error: emailResult.error
+            });
+        }
+
+        console.log('✅ OTP email sent successfully');
+        res.json({
+            success: true,
+            message: 'OTP sent to your email',
+            expiresIn: 600 // seconds
+        });
+
+    } catch (error) {
+        console.error('❌ Error sending OTP:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error sending OTP',
+            error: error.message
+        });
+    }
+});
+
+// Verify OTP for password reset
+app.post('/api/forgot-password/verify-otp', async (req, res) => {
+    try {
+        const { email, otp, userType = 'consumer' } = req.body;
+
+        if (!email || !otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email and OTP are required'
+            });
+        }
+
+        console.log(`🔐 Verifying OTP for email: ${email}`);
+
+        const otpKey = `pwd_reset_${email}`;
+        const storedOTP = otpStore.get(otpKey);
+
+        if (!storedOTP) {
+            console.log('❌ No OTP found for email:', email);
+            return res.status(400).json({
+                success: false,
+                message: 'OTP not found. Please request a new OTP.'
+            });
+        }
+
+        // Check if OTP is expired
+        if (new Date() > storedOTP.expiry) {
+            console.log('❌ OTP expired for email:', email);
+            otpStore.delete(otpKey);
+            return res.status(400).json({
+                success: false,
+                message: 'OTP expired. Please request a new OTP.'
+            });
+        }
+
+        // Check if OTP matches
+        if (storedOTP.otp !== otp) {
+            storedOTP.attempts++;
+            console.log(`❌ Invalid OTP attempt ${storedOTP.attempts} for email: ${email}`);
+
+            if (storedOTP.attempts >= 3) {
+                console.log('🚫 Too many OTP attempts, removing OTP');
+                otpStore.delete(otpKey);
+                return res.status(400).json({
+                    success: false,
+                    message: 'Too many incorrect attempts. Please request a new OTP.'
+                });
+            }
+
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid OTP. Please try again.',
+                attemptsRemaining: 3 - storedOTP.attempts
+            });
+        }
+
+        console.log('✅ OTP verified successfully for:', email);
+        
+        res.json({
+            success: true,
+            message: 'OTP verified successfully',
+            email: email,
+            userType: storedOTP.userType
+        });
+
+    } catch (error) {
+        console.error('❌ Error verifying OTP:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error verifying OTP',
+            error: error.message
+        });
+    }
+});
+
+// Reset password
+app.post('/api/forgot-password/reset', async (req, res) => {
+    try {
+        const { email, newPassword, userType = 'consumer' } = req.body;
+
+        if (!email || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email and new password are required'
+            });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+
+        console.log(`🔄 Resetting password for email: ${email}`);
+
+        // Verify OTP is still valid (user should have verified OTP before calling this)
+        const otpKey = `pwd_reset_${email}`;
+        const storedOTP = otpStore.get(otpKey);
+
+        if (!storedOTP) {
+            console.log('❌ OTP verification required for password reset');
+            return res.status(400).json({
+                success: false,
+                message: 'Please verify OTP first'
+            });
+        }
+
+        // Hash new password
+        const hashedPassword = await hashPassword(newPassword);
+
+        // Update password in database
+        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
+        const { data: updatedUser, error: updateError } = await supabase
+            .from(tableName)
+            .update({ password: hashedPassword })
+            .eq('email', email.toLowerCase().trim())
+            .select('id, email, username');
+
+        if (updateError) {
+            console.error('❌ Database error updating password:', updateError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to update password',
+                error: updateError.message
+            });
+        }
+
+        if (!updatedUser || updatedUser.length === 0) {
+            console.log('❌ User not found for password update:', email);
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        console.log('✅ Password updated successfully for:', email);
+
+        // Clean up OTP
+        otpStore.delete(otpKey);
+
+        res.json({
+            success: true,
+            message: 'Password reset successful',
+            user: updatedUser[0]
+        });
+
+    } catch (error) {
+        console.error('❌ Error resetting password:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error resetting password',
+            error: error.message
+        });
+    }
+});
+
+// Change password for logged-in users
+app.post('/api/change-password', async (req, res) => {
+    try {
+        const { email, currentPassword, newPassword, userType = 'consumer' } = req.body;
+
+        if (!email || !currentPassword || !newPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email, current password, and new password are required'
+            });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'New password must be at least 6 characters long'
+            });
+        }
+
+        console.log(`🔄 Change password request for: ${email}`);
+
+        const tableName = userType === 'farmer' ? 'farmers' : 'consumers';
+
+        // Verify current password
+        const { data: users, error: findError } = await supabase
+            .from(tableName)
+            .select('id, email, password')
+            .eq('email', email.toLowerCase().trim())
+            .limit(1);
+
+        if (findError || !users || users.length === 0) {
+            console.log('❌ User not found:', email);
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        const user = users[0];
+
+        // Verify current password
+        const isValid = await verifyPassword(currentPassword, user.password);
+
+        if (!isValid) {
+            console.log('❌ Invalid current password for:', email);
+            return res.status(401).json({
+                success: false,
+                message: 'Current password is incorrect'
+            });
+        }
+
+        // Hash new password
+        const hashedPassword = await hashPassword(newPassword);
+
+        // Update password
+        const { data: updatedUser, error: updateError } = await supabase
+            .from(tableName)
+            .update({ password: hashedPassword })
+            .eq('id', user.id)
+            .select('id, email, username');
+
+        if (updateError) {
+            console.error('❌ Error updating password:', updateError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to update password'
+            });
+        }
+
+        console.log('✅ Password changed successfully for:', email);
+
+        res.json({
+            success: true,
+            message: 'Password changed successfully',
+            user: updatedUser[0]
+        });
+
+    } catch (error) {
+        console.error('❌ Error changing password:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error changing password',
+            error: error.message
+        });
+    }
+});
+
 // ==================== SERVER START ====================
 const PORT = process.env.PORT || 5000;
 
@@ -3745,6 +4102,11 @@ app.listen(PORT, async () => {
        PUT  /api/farmer/profile/:id    - Update farmer profile
        GET  /api/customer/profile/:id  - Get customer profile
        PUT  /api/customer/profile/:id  - Update customer profile
+       POST /api/forgot-password/check-email  - Check if email exists for password reset
+       POST /api/forgot-password/send-otp     - Send OTP for password reset
+       POST /api/forgot-password/verify-otp   - Verify OTP for password reset
+       POST /api/forgot-password/reset        - Reset password with new password
+       POST /api/change-password              - Change password for logged-in users
     `);
 });
 
