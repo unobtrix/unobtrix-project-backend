@@ -64,19 +64,142 @@ async function sendOTPEmail(email, otp) {
 
 // ==================== SUPABASE CONFIGURATION ====================
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 console.log('🔍 DEBUG: SUPABASE_URL =', supabaseUrl ? 'SET' : 'NOT SET');
-console.log('🔍 DEBUG: SUPABASE_ANON_KEY =', supabaseKey ? 'SET' : 'NOT SET');
+console.log('🔍 DEBUG: SUPABASE_SERVICE_ROLE_KEY =', supabaseServiceRoleKey ? 'SET' : 'NOT SET');
 
-if (!supabaseUrl || !supabaseKey) {
+if (!supabaseUrl || !supabaseServiceRoleKey) {
     console.error('❌ ERROR: Missing required environment variables!');
-    console.error('Required: SUPABASE_URL and SUPABASE_ANON_KEY');
+    console.error('Required: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
     process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
-console.log('🔗 Supabase connected');
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+console.log('🔗 Supabase (service role) connected');
+
+// ==================== SUPABASE AUTH JWT MIDDLEWARE ====================
+const jwt = require('jsonwebtoken');
+
+async function supabaseAuthMiddleware(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: 'Missing or invalid Authorization header' });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+        // Decode JWT to get sub (auth.uid)
+        const decoded = jwt.decode(token);
+        if (!decoded || !decoded.sub) {
+            return res.status(401).json({ success: false, error: 'Invalid Supabase JWT' });
+        }
+        const authId = decoded.sub;
+        // Map authId (UUID) to consumer_id (BIGINT) via consumer_auth_map
+        const { data, error } = await supabase
+            .from('consumer_auth_map')
+            .select('consumer_id')
+            .eq('auth_id', authId)
+            .single();
+        if (error || !data) {
+            return res.status(403).json({ success: false, error: 'No consumer_id mapping for this user' });
+        }
+        req.auth = { auth_id: authId, consumer_id: data.consumer_id };
+        next();
+    } catch (err) {
+        console.error('JWT decode/map error:', err);
+        return res.status(401).json({ success: false, error: 'Authentication failed' });
+    }
+}
+// ==================== SUPABASE INTEGRATION ENDPOINTS ====================
+
+// 1. GET /reviews/:productId → Fetch reviews for a product
+app.get('/reviews/:productId', async (req, res) => {
+    try {
+        const { productId } = req.params;
+        const { data, error } = await supabase
+            .from('reviews')
+            .select('id, consumer_id, product_id, review_text, rating, created_at')
+            .eq('product_id', productId);
+        if (error) {
+            console.error('Error fetching reviews:', error);
+            return res.status(500).json({ success: false, error: error.message });
+        }
+        res.json({ reviews: data || [] });
+    } catch (err) {
+        console.error('Error in /reviews/:productId:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 2. POST /cart → Insert a new cart item (requires Supabase Auth JWT)
+app.post('/cart', supabaseAuthMiddleware, async (req, res) => {
+    try {
+        const consumer_id = req.auth.consumer_id;
+        const { product_id, quantity, price_snapshot } = req.body;
+        if (!product_id || !quantity || !price_snapshot) {
+            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        const { data, error } = await supabase
+            .from('cart_items')
+            .insert({ consumer_id, product_id, quantity, price_snapshot })
+            .select()
+            .single();
+        if (error) {
+            console.error('Error inserting cart item:', error);
+            return res.status(500).json({ success: false, error: error.message });
+        }
+        res.json({ success: true, item: data });
+    } catch (err) {
+        console.error('Error in POST /cart:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 3. GET /cart/:customerId → Fetch cart items for a customer
+app.get('/cart/:customerId', async (req, res) => {
+    try {
+        const { customerId } = req.params;
+        const { data, error } = await supabase
+            .from('cart_items')
+            .select('id, consumer_id, product_id, quantity, price_snapshot, created_at')
+            .eq('consumer_id', customerId);
+        if (error) {
+            console.error('Error fetching cart items:', error);
+            return res.status(500).json({ success: false, error: error.message });
+        }
+        res.json({ cart: data || [] });
+    } catch (err) {
+        console.error('Error in GET /cart/:customerId:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 4. GET /customer/:customerId → Fetch customer profile info
+app.get('/customer/:customerId', async (req, res) => {
+    try {
+        const { customerId } = req.params;
+        const { data, error } = await supabase
+            .from('consumers')
+            .select('*')
+            .eq('id', customerId)
+            .single();
+        if (error) {
+            console.error('Error fetching customer:', error);
+            return res.status(500).json({ success: false, error: error.message });
+        }
+        res.json({ customer: data });
+    } catch (err) {
+        console.error('Error in GET /customer/:customerId:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// ==================== DEBUGGING NOTES ====================
+// - If reviews/cart/customer data is not loading, check RLS policies and ensure consumer_auth_map has correct mappings.
+// - UUID (auth.users.id) must be mapped to BIGINT (consumers.id) in consumer_auth_map for RLS to allow access.
+// - If queries fail with RLS errors, check that the service role key is used and mapping rows exist.
+// - For cart POST, ensure the JWT is a Supabase Auth JWT and consumer_auth_map is up to date.
+// - For customerId mismatches, check for type (string vs number) and mapping consistency.
 // ================================================================
 
 // ==================== FIXED AUTH MIDDLEWARE ====================
