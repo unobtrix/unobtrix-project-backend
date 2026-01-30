@@ -63,20 +63,23 @@ async function sendOTPEmail(email, otp) {
 // =====================================================================
 
 // ==================== SUPABASE CONFIGURATION ====================
+// For Render: Set these in the Render dashboard (Environment tab):
+// SUPABASE_URL, SUPABASE_ANON_KEY, BREVO_API_KEY
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
 console.log('🔍 DEBUG: SUPABASE_URL =', supabaseUrl ? 'SET' : 'NOT SET');
-console.log('🔍 DEBUG: SUPABASE_SERVICE_ROLE_KEY =', supabaseServiceRoleKey ? 'SET' : 'NOT SET');
+console.log('🔍 DEBUG: SUPABASE_ANON_KEY =', supabaseAnonKey ? 'SET' : 'NOT SET');
 
-if (!supabaseUrl || !supabaseServiceRoleKey) {
+if (!supabaseUrl || !supabaseAnonKey) {
     console.error('❌ ERROR: Missing required environment variables!');
-    console.error('Required: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
+    console.error('Required: SUPABASE_URL and SUPABASE_ANON_KEY');
+    console.error('On Render, add these in the Environment tab.');
     process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
-console.log('🔗 Supabase (service role) connected');
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+console.log('🔗 Supabase (anon key) connected');
 
 // ==================== SUPABASE AUTH JWT MIDDLEWARE ====================
 const jwt = require('jsonwebtoken');
