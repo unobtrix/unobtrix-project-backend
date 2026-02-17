@@ -121,7 +121,19 @@ app.get('/reviews/:productId', async (req, res) => {
         const { productId } = req.params;
         const { data, error } = await supabase
             .from('reviews')
-            .select('id, consumer_id, product_id, review_text, rating, created_at')
+            .select(`
+                id,
+                consumer_id,
+                product_id,
+                review_text,
+                rating,
+                created_at,
+                consumers (
+                    id,
+                    username,
+                    profile_photo_url
+                )
+            `)
             .eq('product_id', productId);
         if (error) {
             console.error('Error fetching reviews:', error);
