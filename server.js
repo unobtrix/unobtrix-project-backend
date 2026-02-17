@@ -123,12 +123,12 @@ app.get('/reviews/:productId', async (req, res) => {
             .from('reviews')
             .select(`
                 id,
-                consumer_id,
+                customer_id,
                 product_id,
                 review_text,
                 rating,
                 created_at,
-                consumers (
+                consumers:customer_id (
                     id,
                     username,
                     profile_photo_url
@@ -2663,7 +2663,23 @@ async function recalculateProductRating(productId) {
 }
 
 // ==================== PRODUCT REVIEWS ====================
-
+// Reviews Table Schema (Supabase):
+// - id: bigserial (primary key)
+// - product_id: bigint (foreign key → products.id)
+// - customer_id: bigint (foreign key → consumers.id)  ⚠️ Note: NOT consumer_id
+// - rating: integer (1-5, enforced by check constraint)
+// - review_text: text (nullable)
+// - status: text ('active', 'deleted') - for soft deletes
+// - created_at: timestamp
+// - updated_at: timestamp
+// - reported: boolean (optional flagging)
+//
+// Key Points:
+// 1. Uses customer_id (not consumer_id) to reference consumers table
+// 2. Relationship query syntax: consumers:customer_id (for Supabase foreign key aliasing)
+// 3. Indexes on: product_id, status, unique(product_id, customer_id) WHERE status='active'
+// 4. Soft deletes: status='deleted' instead of hard DELETE
+// ==================== PRODUCT REVIEWS ====================
 // Get reviews for a product
 app.get('/api/products/:id/reviews', requireAuth, async (req, res) => {
     try {
@@ -2680,7 +2696,7 @@ app.get('/api/products/:id/reviews', requireAuth, async (req, res) => {
                 rating,
                 review_text,
                 created_at,
-                consumers (
+                consumers:customer_id (
                     id,
                     username,
                     profile_photo_url
