@@ -4228,12 +4228,53 @@ app.listen(PORT, async () => {
        PUT  /api/farmer/profile/:id    - Update farmer profile
        GET  /api/customer/profile/:id  - Get customer profile
        PUT  /api/customer/profile/:id  - Update customer profile
+       GET  /api/reverse-geocode       - Reverse geocode coordinates (proxy for OSM)
        POST /api/forgot-password/check-email  - Check if email exists for password reset
        POST /api/forgot-password/send-otp     - Send OTP for password reset
        POST /api/forgot-password/verify-otp   - Verify OTP for password reset
        POST /api/forgot-password/reset        - Reset password with new password
        POST /api/change-password              - Change password for logged-in users
     `);
+});
+
+// ==================== REVERSE GEOCODING PROXY ====================
+// Proxy endpoint to handle OpenStreetMap Nominatim API calls
+// This avoids CORS issues when calling from the frontend
+app.get('/api/reverse-geocode', async (req, res) => {
+    try {
+        const { lat, lon } = req.query;
+        
+        if (!lat || !lon) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required parameters: lat and lon'
+            });
+        }
+
+        console.log(`🗺️ Reverse geocoding: lat=${lat}, lon=${lon}`);
+
+        // Call OpenStreetMap Nominatim API from the backend
+        const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+        const response = await fetch(nominatimUrl, {
+            headers: {
+                'User-Agent': 'FarmTrails/1.0 (unobtrix-project-backend)'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Nominatim API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        res.json(data);
+
+    } catch (error) {
+        console.error('❌ Reverse geocoding error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
 
 module.exports = app;
